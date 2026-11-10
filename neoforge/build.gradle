@@ -10,6 +10,7 @@ configurations {
 dependencies {
     neoForge 'net.neoforged:neoforge:21.1.172'
     modImplementation 'dev.architectury:architectury-neoforge:13.0.8'
+    include 'dev.architectury:architectury-neoforge:13.0.8'
     common(project(path: ':common', configuration: 'namedElements')) { transitive = false }
     shadowCommon(project(path: ':common', configuration: 'transformProductionNeoForge')) { transitive = false }
 }

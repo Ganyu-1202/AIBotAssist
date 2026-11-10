@@ -1,0 +1,23 @@
+{
+  "aibotassist.settings.name": "AI 名称",
+  "aibotassist.settings.base": "API /v1 地址",
+  "aibotassist.settings.model": "模型 ID",
+  "aibotassist.settings.key": "API 密钥",
+  "aibotassist.settings.proxy": "HTTP 代理（可空）",
+  "aibotassist.settings.oauth": "OAuth client_id",
+  "aibotassist.settings.runner": "Pi运行器（高级）",
+  "aibotassist.settings.runtime": "自定义Pi（留空自动）",
+  "aibotassist.settings.connection": "连接设置",
+  "aibotassist.settings.advanced": "登录 / Pi运行时",
+  "aibotassist.settings.done": "完成",
+  "aibotassist.settings.cancel": "取消",
+  "aibotassist.settings.login": "TokenNest 登录",
+  "aibotassist.settings.logout": "清除登录/密钥",
+  "aibotassist.settings.initial": "密钥仅存内存；保存不代表联网验证成功。",
+  "aibotassist.settings.saved": "设置已保存；尚未验证模型联网。",
+  "aibotassist.settings.error": "保存失败：检查名称、HTTPS地址及Pi配置。",
+  "aibotassist.settings.auth_wait": "请在浏览器授权，3分钟内完成。",
+  "aibotassist.settings.auth_error": "登录未启动：检查client_id和代理。",
+  "aibotassist.settings.cleared": "已清除会话凭据。",
+  "aibotassist.settings.saved_chat": "设置已保存；聊天栏直接 @%s 你好。"
+}

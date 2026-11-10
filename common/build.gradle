@@ -5,3 +5,23 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
+
+// Build-time only: players receive standalone executables embedded as resources.
+def piRoot = rootProject.file('agent-runtime')
+def npmBun = new File(System.getenv('APPDATA') ?: '', 'npm/node_modules/bun/bin/bun.exe')
+def bunBinary = providers.gradleProperty('bunExecutable').getOrElse(npmBun.isFile() ? npmBun.absolutePath : 'bun')
+tasks.register('prepareBundledPi', Exec) {
+    workingDir piRoot
+    commandLine bunBinary, 'install', '--frozen-lockfile'
+    inputs.files(rootProject.file('agent-runtime/package.json'), rootProject.file('agent-runtime/bun.lock'))
+    outputs.dir(rootProject.file('agent-runtime/node_modules'))
+}
+tasks.register('compileBundledPi', Exec) {
+    dependsOn 'prepareBundledPi'
+    workingDir piRoot
+    commandLine bunBinary, 'build.mjs'
+    inputs.files(fileTree(piRoot) { include '*.mjs'; exclude '*.test.mjs' }, rootProject.file('agent-runtime/bun.lock'))
+    outputs.dir(layout.buildDirectory.dir('generated/pi'))
+}
+sourceSets.main.resources.srcDir(layout.buildDirectory.dir('generated/pi'))
+tasks.named('processResources') { dependsOn 'compileBundledPi' }

@@ -84,3 +84,65 @@
 - NeoForge：neoforge/build/libs/aibotassist-neoforge-0.1.1.jar，SHA256 62f57150108ff16098b76c32c55fa9fa6b89536c339abb5b776b780a39872ea8。
 - 日志：.dev/build-0.1.1.log、.dev/test-0.1.1.log。
 - 本次未启动游戏；设置补全/开关界面、草地建造、真实API及联机任务仍需游戏实测。之前“源码未编译”记录是历史阶段，此次已编入0.1.1。
+
+## 资源准备与2x2合成（源码阶段）
+
+- 自动清障仅覆盖建筑占位处；生存负硬度拒绝，要求工具的方块检查正确工具与保守耐久预算，按块消耗1耐久；未模拟附魔耐久减免或工具相关掉落。
+- 同任务可包含方块与多种一般命令，固定顺序拆除/清障、放置、一般命令。
+- 新增AutoCrafting，真实Shaped/Shapeless配方、递归材料准备、模拟库存、配方matches/assemble/remainingItems。2x2背包合成不需设备，超出2x2寻找附近工作台，缺少时尝试合成并合法放置。
+- `:common:test`成功，现有22项回归通过；未新增真实游戏配方集成测试，不能据此视为资源制作闭环验收。没有重新打包发布JAR。
+- 未完成：熔炉/高炉/烟熏炉燃料及实际加工等待、酿造台材料和加工流程、独立物品制作目标协议、满背包产物/预留材料交付集成验证。现有合成接入面为建筑材料准备，并非完整通用制造Agent。
+
+## 本次建造拒绝诊断
+
+- 已读取 neoforge/run/logs/latest.log：18:27:46 出现“方案格式或命令无效”兜底提示，未记录原异常。开发环境模组标注0.1.1，但回复提及自动清障，不能仅用版本号推断用户运行的是旧发布包。
+- 客户端已解析并提交方案，服务器端校验（特别是清障 removalTarget 的 IllegalArgumentException）同样会进入旧兜底分支；该提示不能证明JSON格式错误。
+- 将拆除拒绝、命令权限/参数拒绝改为明确可控提示；未知异常新增阶段与随机诊断编号，服务端仅记录异常类型及栈帧，不记录请求、模型正文、异常消息或凭据。
+- 公共模块测试成功；未重打JAR、未复现原始模型方案。根因尚待更新后的具体拒绝信息或诊断栈确认。
+
+## 真实Pi Agent集成（未重新打包JAR）
+
+- 只读参考TokenBird packages/shared/src/agent/pi-agent.ts及packages/pi-agent-server的SDK配置，未修改该参考工程。
+- 新增独立agent-runtime：固定@earendil-works/pi-agent-core和pi-ai 0.85.1，Bun锁文件，本地Pi Agent驱动真实工具循环，非自写循环。未接入pi-coding-agent编码扩展。
+- Java PiBridge以JSONL连接本地子进程，Java端完成HTTP/认证，未向Pi发送凭据。无Bash/文件/桌面工具；提供observe_world、execute_task。
+- 服务端观察token绑定请求原点，有限地形/库存/朝向数据；执行工具等待completed/rejected/partial_possible回执，而非提交即结束。取消/断线隔离、轮次/时限/数量预算。
+- `agent-runtime/bun test`：真实SDK子进程离线工具反馈闭环1项通过（7断言），未调用真实模型。
+- `gradlew :common:test`成功，现有22项测试通过。
+- 未完成真实Minecraft+模型端到端实测、Pi伴随运行环境分发打包；现有0.1.1 JAR未重新生成。熔炼/酿造需求仍未完成，不能用Agent替代这些游戏工具的实现。
+
+## 19个Pi游戏工具扩展
+
+- 新增AgentToolCatalog、WorldTools、Structures、ResourceTools、ProcessingService，接入Java客户端/Pi/服务器真实调用链。原observe_world与execute_task加17工具，共19。
+- 资源配方/规划/普通合成、工作台/设备准备；原版炉类与单步酿造真实tick；任务异步等待、状态和取消；建筑预检/模板/差异验证修复；查询和个人持久位置标记。
+- 本次统一执行`:common:test :fabric:compileJava :neoforge:compileJava`成功。44项JUnit，0失败/0错误；新增参数/库存安全打包、结构/schema及加工参数边界测试。
+- `agent-runtime/bun test`真实Pi SDK子进程离线测试5项/27断言通过，覆盖原工具循环及扩展配方/加工/结构/任务状态工具失败反馈。
+- 工具请求call ID最近64回执内存幂等；大响应限制，设备权限/空闲/来源标记/守恒检查。未知效果不自动重试。
+- 本次没有启动真实Minecraft世界验收、没有付费模型端到端测试、没有生成或更新平台发布JAR。compileJava依赖生成common开发jar不等于发布包重打。
+- 加工任务与建筑历史不跨服务器重启恢复；物料留设备现场，不自动认领/猜测退款；个人位置标记存档持久化。特殊配方/切石/锻造只查询不自动执行，炉类限煤/木炭及单次产量1配方。详见agent-runtime/TOOLS.md。
+
+## 设置页溢出与Pi入口错误诊断
+
+- 截图配置使用agent-runtime/index.mjs相对路径，fabric/run及neoforge/run下均不存在该文件；旧实现直接按游戏工作目录解析，未发模型HTTP即可能抛出入口缺失异常。截图通用错误不能证明密钥无效。
+- 设置页改为连接/登录与Pi两页，紧凑行距、底部固定完成/取消，翻页保留输入，密钥仍仅内存且掩码。
+- Pi入口相对路径有界向上5级查找，兼容Loom运行目录；绝对路径保持原样。
+- 启动、入口、HTTP401/403/404/429、连接超时和服务器回执超时分开提示，不输出未知异常原文。
+- :common:test :fabric:compileJava :neoforge:compileJava成功，新增3项路径/安全错误分类测试，现合计47项JUnit通过。
+- 未启动游戏验证分页布局，未验证真实API密钥，不重新生成发布JAR。
+
+## 内嵌依赖验证构建
+
+- Pi+Bun独立编译五平台，SHA256 manifest自动生成；BundledPi自动平台选择、校验、缓存解包、Unix执行权限。默认路径改为空，旧默认相对入口迁移到内嵌模式。
+- Architectury两端Jar-in-Jar、Fabric API Fabric端嵌套；已检查实际remapJar内容和元数据。
+- :common:test :fabric:remapJar :neoforge:remapJar成功，保留0.1.1版本号（同名包已被新构建覆盖，不是版本递增发布）。Fabric163.1MiB、NeoForge160.8MiB。
+- 从实际Fabric JAR提取Windows exe到无node_modules目录，校验哈希，直接启动（不经Bun命令），真实Pi核心离线完成2轮模型+1工具反馈测试。
+- 玩家不再安装运行时/依赖；构建机首次仍需Bun及网络下载，未将操作系统、Java或模组加载器嵌入。
+- 未验证Linux/macOS执行、真实游戏内自动解包启动、嵌套前置运行兼容性；不把资源存在等同加载验证。
+
+## 混合材料、英简中及模式黑名单/特殊放置
+
+- 删除固定材料白名单，注册表校验，不限混用材料种数。build_structure增加palette墙/地板/屋顶/框架/窗户。
+- Plan.Placement支持properties和nbt，SpecialPlacement真实状态解析、门床展开/成本、源流体桶、受控容器NBT；创造空命令方块可放，生存黑名单禁止。
+- BlockPolicy四模式独立placeDenied/breakDenied，精确ID/命名空间通配符，自动配置和OP重载。
+- 配置界面en_us/zh_cn各21键一致；Agent每次读取Minecraft语言设置作为回答偏好。部分服务器提示仍中文。
+- :common:test :fabric:compileJava :neoforge:compileJava最后运行成功，60项JUnit 0失败0错误。特殊方块测试实际8方法，非子会话报告的9组。
+- 未新打平台发布JAR；未游戏内验收门床邻居规则、容器SNBT、流体桶和保护模组兼容。详细行为见BLOCK_POLICY.md。

@@ -10,13 +10,13 @@ public record Plan(String reply, List<Placement> blocks, List<String> commands, 
     public boolean hasActions() { return !blocks.isEmpty() || !commands.isEmpty() || !removals.isEmpty(); }
     public record Removal(int x, int y, int z) {}
     public static final int MAX_BLOCKS = 256, RADIUS = 16;
-    public static final Set<String> ALLOWED = Set.of(
-        "minecraft:oak_planks", "minecraft:spruce_planks", "minecraft:birch_planks",
-        "minecraft:cobblestone", "minecraft:stone", "minecraft:stone_bricks",
-        "minecraft:bricks", "minecraft:glass", "minecraft:white_concrete",
-        "minecraft:oak_log", "minecraft:spruce_log", "minecraft:polished_andesite",
-        "minecraft:smooth_stone", "minecraft:sandstone", "minecraft:deepslate_bricks");
-    public record Placement(int x, int y, int z, String block) {}
+    public static boolean validBlockId(String id) {
+        return id != null && id.length()<=160 && id.matches("[a-z0-9_.-]+:[a-z0-9/._-]+");
+    }
+    public record Placement(int x, int y, int z, String block, Map<String,String> properties, String nbt) {
+        public Placement(int x,int y,int z,String block){this(x,y,z,block,Map.of(),"");}
+        public Placement { properties=properties==null?Map.of():Map.copyOf(properties);nbt=nbt==null?"":nbt; }
+    }
     public static Plan parse(String text) {
         if (text == null || text.length() > 100_000) throw new IllegalArgumentException("方案过长");
         JsonObject o = JsonParser.parseString(text).getAsJsonObject();
@@ -32,9 +32,16 @@ public record Plan(String reply, List<Placement> blocks, List<String> commands, 
             String id = b.get("block").getAsString();
             if (Math.abs((long)x) > RADIUS || Math.abs((long)y) > RADIUS || Math.abs((long)z) > RADIUS)
                 throw new IllegalArgumentException("超出建造半径");
-            if (!ALLOWED.contains(id)) throw new IllegalArgumentException("不支持的方块");
+            if (!validBlockId(id)) throw new IllegalArgumentException("方块ID格式无效");
             if (!seen.add(x + "," + y + "," + z)) throw new IllegalArgumentException("重复坐标");
-            result.add(new Placement(x, y, z, id));
+            Map<String,String> properties=new LinkedHashMap<>();
+            if(b.has("properties")&&!b.get("properties").isJsonNull())for(var entry:b.getAsJsonObject("properties").entrySet()){
+                if(properties.size()>=32||!entry.getKey().matches("[a-z0-9_]{1,64}")||!entry.getValue().getAsString().matches("[a-z0-9_-]{1,64}"))throw new IllegalArgumentException("方块状态无效");
+                properties.put(entry.getKey(),entry.getValue().getAsString());
+            }
+            String nbt=b.has("nbt")&&!b.get("nbt").isJsonNull()?b.get("nbt").getAsString():"";
+            if(nbt.length()>8192)throw new IllegalArgumentException("方块NBT过长");
+            result.add(new Placement(x,y,z,id,properties,nbt));
         }
         List<String> commands = new ArrayList<>();
         if (o.has("commands")) {
@@ -55,8 +62,6 @@ public record Plan(String reply, List<Placement> blocks, List<String> commands, 
                 removals.add(new Removal(x, y, z));
             }
         }
-        if ((!result.isEmpty() || !removals.isEmpty()) && !commands.isEmpty())
-            throw new IllegalArgumentException("方块任务与一般命令请分开请求");
         return new Plan(reply, List.copyOf(result), List.copyOf(commands), List.copyOf(removals));
     }
     private static int integer(JsonObject o, String key) {

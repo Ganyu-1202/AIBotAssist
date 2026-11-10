@@ -28,9 +28,9 @@ class CommandPolicyTest {
         assertTrue(p.hasActions()); assertEquals("time query daytime", p.commands().getFirst());
         assertFalse(Plan.parse("{\"reply\":\"你好\",\"blocks\":[]}").hasActions());
     }
-    @Test void rejectsForbiddenPlansAndMixedActions() {
+    @Test void rejectsForbiddenPlansAndAcceptsMixedActions() {
         assertThrows(Exception.class, () -> Plan.parse("{\"reply\":\"x\",\"blocks\":[],\"commands\":[\"kill @s\"]}"));
-        assertThrows(Exception.class, () -> Plan.parse("{\"reply\":\"x\",\"blocks\":[{\"x\":1,\"y\":1,\"z\":1,\"block\":\"minecraft:stone\"}],\"commands\":[\"time query daytime\"]}"));
+        assertDoesNotThrow(() -> Plan.parse("{\"reply\":\"x\",\"blocks\":[{\"x\":1,\"y\":1,\"z\":1,\"block\":\"minecraft:stone\"}],\"commands\":[\"time query daytime\"]}"));
     }
     @Test void limitsCommandCountAndLength() {
         assertThrows(Exception.class, () -> CommandPolicy.normalize("say " + "x".repeat(256)));

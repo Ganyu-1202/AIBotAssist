@@ -9,53 +9,59 @@ import net.minecraft.Util;
 
 public final class SettingsScreen extends Screen {
     private final Screen parent;
-    private EditBox name, base, model, key, proxy, clientId;
-    private String status = "密钥/令牌仅保存在内存，不写磁盘，不发送给服务器。";
-    public SettingsScreen(Screen parent) { super(Component.literal("AI Bot Assist")); this.parent = parent; }
-    private EditBox field(int y, String label, String value, int max) {
-        EditBox e = new EditBox(font, width / 2 - 30, y, 230, 20, Component.literal(label));
-        e.setMaxLength(max); e.setValue(value); addRenderableWidget(e); return e;
+    private final String[] labels={"name","base","model","key","proxy","oauth","runner","runtime"};
+    private final String[] values=new String[8];
+    private final EditBox[] fields=new EditBox[8];
+    private int page,startY,rowStep,left,formWidth;
+    private Component status=tr("initial");
+    private static Component tr(String key){return Component.translatable("aibotassist.settings."+key);}
+    public SettingsScreen(Screen parent) {
+        super(Component.literal("AI Bot Assist"));this.parent=parent;
+        ClientSettings s=ClientMod.settings;
+        String[] initial={s.name,s.baseUrl,s.model,"",s.proxy,s.clientId,s.piExecutable,s.piRuntime};
+        System.arraycopy(initial,0,values,0,8);
     }
+    private void capture(){for(int i=0;i<8;i++)if(fields[i]!=null)values[i]=fields[i].getValue();}
     protected void init() {
-        int y = Math.max(32, (height - 290) / 2);
-        ClientSettings s = ClientMod.settings;
-        name = field(y, "AI 名称", s.name, 24);
-        base = field(y + 28, "API /v1 地址", s.baseUrl, 250);
-        model = field(y + 56, "模型 ID", s.model, 100);
-        key = field(y + 84, "API 密钥", "", 512);
-        key.setFormatter((text, offset) -> FormattedCharSequence.forward("•".repeat(text.length()), net.minecraft.network.chat.Style.EMPTY));
-        proxy = field(y + 112, "HTTP 代理（可空）", s.proxy, 200);
-        clientId = field(y + 140, "OAuth client_id", s.clientId, 200);
-        addRenderableWidget(Button.builder(Component.literal("完成"), b -> {
-            if (!save()) return;
-            onClose();
-            ClientMod.say("设置已保存；聊天栏直接 @" + ClientMod.settings.name + " 你好。");
-        }).bounds(width/2-200,y+174,125,20).build());
-        addRenderableWidget(Button.builder(Component.literal("TokenNest 登录"), b -> {
-            if (!save()) return;
-            try { var uri = ClientMod.connection.login(ClientMod.settings, ClientMod::say); Util.getPlatform().openUri(uri); status = "请在浏览器授权，3分钟内完成。"; }
-            catch (Exception e) { status = "登录未启动：请检查 OAuth client_id 和代理设置。"; }
-        }).bounds(width/2-65,y+174,130,20).build());
-        addRenderableWidget(Button.builder(Component.literal("清除登录/密钥"), b -> { ClientMod.connection.logout(); key.setValue(""); status = "已清除本地会话凭据。"; }).bounds(width/2+75,y+174,125,20).build());
-        addRenderableWidget(Button.builder(Component.literal("返回"), b -> onClose()).bounds(width/2-65,y+202,130,20).build());
+        capture();java.util.Arrays.fill(fields,null);
+        formWidth=Math.min(400,width-16);left=(width-formWidth)/2;
+        startY=50;rowStep=Math.max(24,Math.min(32,(height-135)/5));
+        addRenderableWidget(Button.builder(tr("connection"),b->{capture();page=0;rebuildWidgets();}).bounds(left,25,formWidth/2-2,20).build());
+        addRenderableWidget(Button.builder(tr("advanced"),b->{capture();page=1;rebuildWidgets();}).bounds(left+formWidth/2+2,25,formWidth/2-2,20).build());
+        int first=page==0?0:5,last=page==0?5:8;
+        for(int i=first;i<last;i++) {
+            int y=startY+(i-first)*rowStep;
+            int labelWidth=Math.min(110,formWidth/3);
+            EditBox e=new EditBox(font,left+labelWidth,y,formWidth-labelWidth,20,tr(labels[i]));
+            e.setMaxLength(i==0?24:i==3?512:i==7?500:250);e.setValue(values[i]);fields[i]=e;addRenderableWidget(e);
+            if(i==3)e.setFormatter((text,offset)->FormattedCharSequence.forward("•".repeat(text.length()),net.minecraft.network.chat.Style.EMPTY));
+        }
+        int buttonWidth=(formWidth-6)/2;
+        addRenderableWidget(Button.builder(tr("done"),b->{if(!save())return;onClose();ClientMod.say(Component.translatable("aibotassist.settings.saved_chat",ClientMod.settings.name).getString());}).bounds(left,height-28,buttonWidth,20).build());
+        addRenderableWidget(Button.builder(tr("cancel"),b->onClose()).bounds(left+buttonWidth+6,height-28,buttonWidth,20).build());
+        if(page==1) {
+            addRenderableWidget(Button.builder(tr("login"),b->{
+                if(!save())return;
+                try{Util.getPlatform().openUri(ClientMod.connection.login(ClientMod.settings,ClientMod::say));status=tr("auth_wait");}
+                catch(Exception e){status=tr("auth_error");}
+            }).bounds(left,height-77,buttonWidth,20).build());
+            addRenderableWidget(Button.builder(tr("logout"),b->{ClientMod.connection.logout();values[3]="";status=tr("cleared");}).bounds(left+buttonWidth+6,height-77,buttonWidth,20).build());
+        }
     }
-    private boolean save() {
-        try {
-            ClientSettings s = new ClientSettings();
-            s.name = name.getValue().trim(); s.baseUrl = base.getValue().trim(); s.model = model.getValue().trim();
-            s.proxy = proxy.getValue().trim(); s.clientId = clientId.getValue().trim(); s.save();
-            if (!key.getValue().isBlank()) { ClientMod.connection.setKey(key.getValue()); key.setValue(""); }
-            ClientMod.settings = s; status = "已保存；聊天栏直接 @" + s.name + " 你好。"; return true;
-        } catch (Exception e) { status = "保存失败：名称为1–24位字母/汉字/数字，API 使用 HTTPS。"; return false; }
+    private boolean save(){
+        capture();
+        try{
+            ClientSettings s=new ClientSettings();s.name=values[0].trim();s.baseUrl=values[1].trim();s.model=values[2].trim();s.proxy=values[4].trim();s.clientId=values[5].trim();s.piExecutable=values[6].trim();s.piRuntime=values[7].trim();s.save();
+            if(!values[3].isBlank()){ClientMod.connection.setKey(values[3]);values[3]="";if(fields[3]!=null)fields[3].setValue("");}
+            ClientMod.settings=s;status=tr("saved");return true;
+        }catch(Exception e){status=tr("error");return false;}
     }
-    public void render(GuiGraphics g, int mx, int my, float dt) {
-        super.render(g, mx, my, dt);
-        int y = Math.max(32, (height - 290) / 2);
-        g.drawCenteredString(font, title, width/2, y-22, 0xFFFFFF);
-        String[] labels = {"AI 名称", "API /v1 地址", "模型 ID", "API 密钥", "HTTP 代理（可空）", "OAuth client_id"};
-        for (int i=0;i<labels.length;i++) g.drawString(font, labels[i], width/2-200,y+6+i*28,0xDDDDDD);
-        g.drawCenteredString(font, status, width/2, y+238,0xCCCCCC);
+    public void render(GuiGraphics g,int mx,int my,float dt){
+        super.render(g,mx,my,dt);g.drawCenteredString(font,title,width/2,8,0xFFFFFF);
+        int first=page==0?0:5,last=page==0?5:8;
+        for(int i=first;i<last;i++)g.drawString(font,tr(labels[i]),left,startY+(i-first)*rowStep+6,0xDDDDDD);
+        g.drawWordWrap(font,status,left,height-52,formWidth,0xCCCCCC);
     }
-    public boolean isPauseScreen() { return false; }
-    public void onClose() { key.setValue(""); minecraft.setScreen(parent); }
+    public boolean isPauseScreen(){return false;}
+    public void onClose(){values[3]="";if(fields[3]!=null)fields[3].setValue("");minecraft.setScreen(parent);}
 }

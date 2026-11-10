@@ -1,0 +1,23 @@
+{
+  "aibotassist.settings.name": "AI name",
+  "aibotassist.settings.base": "API /v1 URL",
+  "aibotassist.settings.model": "Model ID",
+  "aibotassist.settings.key": "API key",
+  "aibotassist.settings.proxy": "HTTP proxy (optional)",
+  "aibotassist.settings.oauth": "OAuth client_id",
+  "aibotassist.settings.runner": "Pi runner (advanced)",
+  "aibotassist.settings.runtime": "Custom Pi (blank: bundled)",
+  "aibotassist.settings.connection": "Connection",
+  "aibotassist.settings.advanced": "Login / Pi runtime",
+  "aibotassist.settings.done": "Done",
+  "aibotassist.settings.cancel": "Cancel",
+  "aibotassist.settings.login": "Sign in to TokenNest",
+  "aibotassist.settings.logout": "Clear login / key",
+  "aibotassist.settings.initial": "Keys stay in memory. Saving does not verify API access.",
+  "aibotassist.settings.saved": "Settings saved. API connectivity has not been verified.",
+  "aibotassist.settings.error": "Save failed: check name, HTTPS URL and Pi settings.",
+  "aibotassist.settings.auth_wait": "Authorize in your browser within 3 minutes.",
+  "aibotassist.settings.auth_error": "Login could not start: check client_id and proxy.",
+  "aibotassist.settings.cleared": "Session credentials cleared.",
+  "aibotassist.settings.saved_chat": "Settings saved. Chat with @%s hello."
+}

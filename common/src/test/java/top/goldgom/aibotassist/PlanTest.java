@@ -13,10 +13,10 @@ class PlanTest {
         Plan p = Plan.parse(json(block("1","0","3","minecraft:oak_planks")+","+block("2","0","3","minecraft:oak_planks")));
         assertEquals(2, p.materials().get("minecraft:oak_planks"));
     }
-    @Test void rejectsCommandBlocks() { assertThrows(Exception.class, () -> Plan.parse(json(block("1","0","3","minecraft:command_block")))); }
-    @Test void rejectsAirAndTnt() {
+    @Test void acceptsRegisteredIdSyntaxWithoutWhitelist() { assertDoesNotThrow(() -> Plan.parse(json(block("1","0","3","minecraft:command_block")))); }
+    @Test void acceptsAllWellFormedBlockIds() {
         for (String id : new String[]{"minecraft:air","minecraft:tnt","minecraft:lava","minecraft:chest"})
-            assertThrows(Exception.class, () -> Plan.parse(json(block("1","0","3",id))));
+            assertDoesNotThrow(() -> Plan.parse(json(block("1","0","3",id))));
     }
     @Test void rejectsDuplicatePositions() { String b=block("1","0","3","minecraft:oak_planks"); assertThrows(Exception.class, () -> Plan.parse(json(b+","+b))); }
     @Test void rejectsFractionsAndOverflow() {

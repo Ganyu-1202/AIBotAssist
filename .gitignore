@@ -5,3 +5,7 @@
 .idea/
 *.iml
 **/aibotassist-private*
+
+agent-runtime/node_modules/
+
+agent-runtime/dist/
