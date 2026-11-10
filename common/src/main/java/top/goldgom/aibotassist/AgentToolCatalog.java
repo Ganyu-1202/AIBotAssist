@@ -26,7 +26,36 @@ public final class AgentToolCatalog {
     private static void add(JsonArray tools,String name,String desc,String fields) {
         JsonObject properties=new JsonObject();for(String field:fields.split(",")) {if(field.isBlank())continue;String[] pair=field.split(":");JsonObject type=new JsonObject();type.addProperty("type",pair[1]);if(pair[1].equals("array")){JsonObject item=new JsonObject();item.addProperty("type","integer");type.add("items",item);}properties.add(pair[0],type);}
         JsonObject schema=new JsonObject();schema.addProperty("type","object");schema.add("properties",properties);schema.addProperty("additionalProperties",false);
+        JsonArray required=new JsonArray();required(name).forEach(required::add);schema.add("required",required);
         JsonObject f=new JsonObject();f.addProperty("name",name);f.addProperty("description",desc);f.add("parameters",schema);JsonObject t=new JsonObject();t.addProperty("type","function");t.add("function",f);tools.add(t);
+    }
+    public static java.util.List<String> required(String tool) {
+        return switch(tool) {
+            case "build_structure" -> List.of("token","kind","width","depth","height");
+            case "preview_task" -> List.of("token","plan");
+            case "repair_structure" -> List.of("token","task_id");
+            case "get_task_status","cancel_task","verify_result" -> List.of("task_id");
+            case "query_recipes" -> List.of("item");
+            case "process_items" -> List.of("device");
+            default -> List.of();
+        };
+    }
+    public static void validateArgs(String tool,JsonObject args) {
+        if(args==null)throw new IllegalArgumentException("工具参数args必须为对象");
+        for(String key:required(tool))if(!args.has(key)||args.get(key).isJsonNull())throw new IllegalArgumentException("工具 "+tool+" 缺少必填参数："+key);
+        if(tool.equals("build_structure")) {
+            for(String key:List.of("width","depth","height"))try{args.get(key).getAsBigDecimal().intValueExact();}catch(Exception e){throw new IllegalArgumentException(key+"必须为整数");}
+            fallbackMaterial(args);
+        }
+    }
+    public static String fallbackMaterial(JsonObject args) {
+        if(args.has("material")&&!args.get("material").isJsonNull()&&!args.get("material").getAsString().isBlank())return args.get("material").getAsString();
+        if(args.has("palette")&&args.get("palette").isJsonObject()) {
+            JsonObject palette=args.getAsJsonObject("palette");
+            if(palette.has("wall")&&!palette.get("wall").isJsonNull())return palette.get("wall").getAsString();
+            for(var value:palette.entrySet())if(!value.getValue().isJsonNull())return value.getValue().getAsString();
+        }
+        throw new IllegalArgumentException("build_structure需要material或非空palette；请补全建筑材料");
     }
     private AgentToolCatalog() {}
 }

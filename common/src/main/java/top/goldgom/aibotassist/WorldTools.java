@@ -31,7 +31,7 @@ public final class WorldTools {
         List<Plan.Placement> missing=new ArrayList<>();
         for(var target:b.plan.blocks()) {
             BlockPos pos=b.origin.offset(target.x(),target.y(),target.z());if(!p.serverLevel().hasChunkAt(pos))throw new IllegalArgumentException("建筑区块未加载");
-            if(p.serverLevel().getBlockState(pos).equals(SpecialPlacement.state(target)))continue;
+            if(SpecialPlacement.matches(target,p.serverLevel().getBlockState(pos)))continue;
             var existing=p.serverLevel().getBlockState(pos);if(!existing.isAir()&&!existing.canBeReplaced())throw new IllegalArgumentException("修复目标被其他实心方块占用，请先检查，不自动拆除后来改建");
             BlockPos relative=pos.subtract(currentOrigin);if(Math.abs(relative.getX())>16||Math.abs(relative.getY())>16||Math.abs(relative.getZ())>16)throw new IllegalArgumentException("距离建筑过远");
             if(!SpecialPlacement.isUpperOrHead(target))missing.add(new Plan.Placement(relative.getX(),relative.getY(),relative.getZ(),target.block(),target.properties(),target.nbt()));
@@ -76,7 +76,7 @@ public final class WorldTools {
             case "get_operation_history" -> {JsonArray events=new JsonArray();history.getOrDefault(p.getUUID(),new ArrayDeque<>()).forEach(events::add);result.add("events",events);}
             case "verify_result" -> {
                 Blueprint b=blueprints.getOrDefault(p.getUUID(),new LinkedHashMap<>()).get(args.get("task_id").getAsString());if(b==null||!b.dimension.equals(p.serverLevel().dimension().location().toString()))throw new IllegalArgumentException("没有当前维度个人建筑记录");
-                int mismatched=0;for(var block:b.plan.blocks()){BlockPos pos=b.origin.offset(block.x(),block.y(),block.z());if(!p.serverLevel().hasChunkAt(pos))throw new IllegalArgumentException("区块未加载");if(!p.serverLevel().getBlockState(pos).equals(SpecialPlacement.state(block)))mismatched++;}
+                int mismatched=0;for(var block:b.plan.blocks()){BlockPos pos=b.origin.offset(block.x(),block.y(),block.z());if(!p.serverLevel().hasChunkAt(pos))throw new IllegalArgumentException("区块未加载");if(!SpecialPlacement.matches(block,p.serverLevel().getBlockState(pos)))mismatched++;}
                 result.addProperty("expected",b.plan.blocks().size());result.addProperty("mismatched",mismatched);result.addProperty("matches",mismatched==0);
             }
             default -> throw new IllegalArgumentException("未知世界工具");

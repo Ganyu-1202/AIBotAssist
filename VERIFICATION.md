@@ -146,3 +146,18 @@
 - 配置界面en_us/zh_cn各21键一致；Agent每次读取Minecraft语言设置作为回答偏好。部分服务器提示仍中文。
 - :common:test :fabric:compileJava :neoforge:compileJava最后运行成功，60项JUnit 0失败0错误。特殊方块测试实际8方法，非子会话报告的9组。
 - 未新打平台发布JAR；未游戏内验收门床邻居规则、容器SNBT、流体桶和保护模组兼容。详细行为见BLOCK_POLICY.md。
+
+## 80b3ea44建造工具空指针修复
+
+- 实读fabric/run/logs/latest.log，01:21:55诊断80b3ea44：NullPointerException位于BuildService.receive第70行，即build_structure多参数直接读取。原请求未留存，不能证实具体遗漏的是kind/尺寸/material哪一个。
+- AgentToolCatalog曾未声明required，服务器也未做缺字段校验；修复schema必填字段和服务器validateArgs。
+- build_structure可只提供palette，从wall或首个有效材料取回退；既无material又无palette明确返回rejected，供Pi修正，不再空指针。
+- 新增4项AgentArgumentsTest；公共及两端源码编译成功，共64项JUnit通过。
+- 尚未复现真实模型原参数，未游戏内验收、未重打发布JAR。
+
+## 玻璃板邻接状态与修复链路
+
+- 实读Fabric日志：112格建筑包含11玻璃板，放置后状态比较失败；b10fa478栈指向WorldTools.repair第35行（既有实心目标拒绝）。没有原始坐标方块快照，不能确证报错坐标具体类型；玻璃板自动邻接是与代码和材料最吻合的原因。
+- 新增SpecialPlacement.matches：玻璃板/栅栏/CrossCollision及墙忽略邻接连接状态，楼梯忽略自动shape；类型、朝向等其他状态仍严格。执行、验证、修复统一使用。
+- repair预期占用拒绝转明确rejected回执，不再未知诊断异常；实际放置/拆除/命令计数独立，消除已造房仍报完成0步。
+- 新增2项测试，公共与两加载器源码编译成功，66项JUnit通过。未真实世界重测、未重打发布JAR。

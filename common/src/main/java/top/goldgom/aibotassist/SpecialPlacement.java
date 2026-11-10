@@ -141,6 +141,20 @@ public final class SpecialPlacement {
         return result + tag; // Canonical SNBT, not the untrusted original text.
     }
 
+    /** Neighbor-derived connections are expected to change after a batch. Keep semantic states strict. */
+    public static boolean matches(Plan.Placement expected, BlockState actual) {
+        BlockState desired=state(expected);
+        if(actual.getBlock()!=desired.getBlock())return false;
+        Set<String> derived=new HashSet<>();
+        if(desired.getBlock() instanceof CrossCollisionBlock || desired.getBlock() instanceof WallBlock)
+            derived.addAll(Set.of("north","south","east","west","up"));
+        if(desired.getBlock() instanceof StairBlock)derived.add("shape");
+        for(Property<?> property:desired.getProperties()) {
+            if(derived.contains(property.getName()))continue;
+            if(!Objects.equals(actual.getValue(property),desired.getValue(property)))return false;
+        }
+        return true;
+    }
     private static <T extends Comparable<T>> String valueName(BlockState s, Property<T> p) { return p.getName(s.getValue(p)); }
 
     private static CompoundTag parseNbt(String text) {

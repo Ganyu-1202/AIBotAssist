@@ -114,4 +114,15 @@ class SpecialPlacementTest {
             "[{Slot:0b,id:'minecraft:missing',count:1}]", "[{Slot:0b,id:'minecraft:stone',count:1},{Slot:0b,id:'minecraft:stone',count:1}]",
             "[{Slot:0b,id:'minecraft:stone',count:1,tag:{Command:'kill @a'}}]", "[1]")) reject("chest", "{Items:" + items + "}", true);
     }
+
+    @org.junit.jupiter.api.Test void neighborConnectionsAreNotPlacementFailures() {
+        var pane=new Plan.Placement(0,0,0,"minecraft:glass_pane");
+        var connected=SpecialPlacement.state(pane).setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.NORTH,true);
+        org.junit.jupiter.api.Assertions.assertTrue(SpecialPlacement.matches(pane,connected));
+        org.junit.jupiter.api.Assertions.assertFalse(SpecialPlacement.matches(pane,net.minecraft.world.level.block.Blocks.STONE.defaultBlockState()));
+    }
+    @org.junit.jupiter.api.Test void semanticDirectionStillMatters() {
+        var door=new Plan.Placement(0,0,0,"minecraft:oak_door",java.util.Map.of("facing","east"),"");
+        org.junit.jupiter.api.Assertions.assertFalse(SpecialPlacement.matches(door,SpecialPlacement.state(door).setValue(net.minecraft.world.level.block.DoorBlock.FACING,net.minecraft.core.Direction.WEST)));
+    }
 }
