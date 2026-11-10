@@ -43,7 +43,15 @@ public final class ClientMod {
             askAgent(prompt,NetworkManager.canServerReceive(Wire.Up.TYPE));
             return EventResult.interruptFalse();
         });
-        ClientPlayerEvent.CLIENT_PLAYER_QUIT.register(player -> { generation++; toolResults.values().forEach(f->f.completeExceptionally(new InterruptedException()));toolResults.clear(); settingsDelay = 0; });
+        ClientPlayerEvent.CLIENT_PLAYER_JOIN.register(player -> {
+            Minecraft mc=Minecraft.getInstance();String identity;
+            if(mc.getSingleplayerServer()!=null)identity="single:"+mc.getSingleplayerServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toAbsolutePath().normalize();
+            else if(mc.getCurrentServer()!=null)identity="server:"+mc.getCurrentServer().ip.toLowerCase(java.util.Locale.ROOT);
+            else identity="connection:"+java.util.UUID.randomUUID();
+            identity+="|player:"+mc.getUser().getProfileId();
+            connection.enter(identity,settings);
+        });
+        ClientPlayerEvent.CLIENT_PLAYER_QUIT.register(player -> { connection.logout(); generation++; toolResults.values().forEach(f->f.completeExceptionally(new InterruptedException()));toolResults.clear(); settingsDelay = 0; });
         ClientTickEvent.CLIENT_POST.register(mc -> {
             if (settingsDelay > 0 && --settingsDelay == 0 && mc.player != null)
                 mc.setScreen(new SettingsScreen(null));

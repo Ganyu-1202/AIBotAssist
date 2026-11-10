@@ -45,13 +45,14 @@ public final class SettingsScreen extends Screen {
                 try{Util.getPlatform().openUri(ClientMod.connection.login(ClientMod.settings,ClientMod::say));status=tr("auth_wait");}
                 catch(Exception e){status=tr("auth_error");}
             }).bounds(left,height-77,buttonWidth,20).build());
-            addRenderableWidget(Button.builder(tr("logout"),b->{ClientMod.connection.logout();values[3]="";status=tr("cleared");}).bounds(left+buttonWidth+6,height-77,buttonWidth,20).build());
+            addRenderableWidget(Button.builder(tr("logout"),b->{ClientMod.connection.forget();values[3]="";status=tr("cleared");}).bounds(left+buttonWidth+6,height-77,buttonWidth,20).build());
         }
     }
     private boolean save(){
         capture();
         try{
             ClientSettings s=new ClientSettings();s.name=values[0].trim();s.baseUrl=values[1].trim();s.model=values[2].trim();s.proxy=values[4].trim();s.clientId=values[5].trim();s.piExecutable=values[6].trim();s.piRuntime=values[7].trim();s.save();
+            ClientMod.connection.configure(s);
             if(!values[3].isBlank()){ClientMod.connection.setKey(values[3]);values[3]="";if(fields[3]!=null)fields[3].setValue("");}
             ClientMod.settings=s;status=tr("saved");return true;
         }catch(Exception e){status=tr("error");return false;}

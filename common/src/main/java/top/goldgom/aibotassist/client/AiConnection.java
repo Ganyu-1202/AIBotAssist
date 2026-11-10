@@ -12,16 +12,34 @@ import java.util.concurrent.*;
 import java.util.function.Consumer;
 import top.goldgom.aibotassist.Plan;
 
-/** Secrets are intentionally session-only and never serialized, logged or sent to Minecraft. */
+/** Secrets remain client-local and are never logged or sent to Minecraft/Pi. */
 public final class AiConnection {
     public static final String NEST = "https://openai.goldgom.top";
     private volatile String apiKey = "", access = "", refresh = "";
     private volatile long expires;
     private volatile HttpServer callback;
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(r -> { Thread t = new Thread(r, "aibot-oauth-timeout"); t.setDaemon(true); return t; });
-    public void setKey(String key) { apiKey = key.trim(); access = ""; refresh = ""; }
-    public void logout() { apiKey = ""; access = ""; refresh = ""; if (callback != null) { callback.stop(0); callback = null; } }
-    public boolean ready() { return !apiKey.isBlank() || !access.isBlank(); }
+    private String scope, boundEndpoint="",boundClientId="";
+    private final LocalCredentials store=new LocalCredentials(dev.architectury.platform.Platform.getConfigFolder().resolve("aibotassist/private"));
+    public synchronized void enter(String identity,ClientSettings settings) {
+        logout();scope=LocalCredentials.scope(identity);boundEndpoint=settings.baseUrl;boundClientId=settings.clientId;
+        try{var saved=store.load(scope);if(saved!=null&&saved.endpoint().equals(settings.baseUrl)&&saved.clientId().equals(settings.clientId)){
+            apiKey=saved.apiKey();access=saved.access();refresh=saved.refresh();expires=saved.expires();
+        }}catch(Exception e){ClientMod.say("无法读取当前世界的本地凭据，请重新填写；未输出敏感数据。");}
+    }
+    public synchronized void configure(ClientSettings settings){
+        if(!boundEndpoint.equals(settings.baseUrl)||!boundClientId.equals(settings.clientId)) {clearMemory();boundEndpoint=settings.baseUrl;boundClientId=settings.clientId;}
+    }
+    private void persist(){
+        if(scope==null)throw new IllegalStateException("尚未进入世界，无法保存凭据");
+        try{store.save(scope,new LocalCredentials.Secret(apiKey,access,refresh,expires,boundEndpoint,boundClientId));}
+        catch(Exception e){throw new IllegalStateException("本地凭据保存失败",e);}
+    }
+    public synchronized void setKey(String key) {apiKey=key.trim();access="";refresh="";expires=0;persist();}
+    private void clearMemory(){apiKey="";access="";refresh="";expires=0;if(callback!=null){callback.stop(0);callback=null;}}
+    public synchronized void logout(){clearMemory();scope=null;}
+    public synchronized void forget(){try{if(scope!=null)store.delete(scope);}catch(Exception e){throw new IllegalStateException("无法删除本地凭据",e);}clearMemory();}
+    public boolean ready(){return !apiKey.isBlank()||!access.isBlank()||!refresh.isBlank();}
     private static HttpClient client(String proxy) {
         HttpClient.Builder b = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).followRedirects(HttpClient.Redirect.NEVER);
         if (!proxy.isBlank()) {
@@ -46,7 +64,7 @@ public final class AiConnection {
         }
     }
     private synchronized String bearer(ClientSettings settings) throws Exception {
-        if (access.isBlank()) return apiKey;
+        if (access.isBlank()&&refresh.isBlank()) return apiKey;
         if (expires <= System.currentTimeMillis() + 30_000) {
             if (refresh.isBlank()) throw new IllegalStateException("请重新登录");
             tokens(settings, "grant_type=refresh_token&refresh_token=" + enc(refresh) + "&client_id=" + enc(settings.clientId));
@@ -70,6 +88,7 @@ public final class AiConnection {
     public synchronized URI login(ClientSettings settings, Consumer<String> status) throws Exception {
         if (settings.clientId.isBlank()) throw new IllegalStateException("请先填写注册的 TokenNest OAuth client_id");
         if (callback != null) throw new IllegalStateException("登录已在等待浏览器授权");
+        String loginScope=scope;
         String verifier = random(), state = random();
         String challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII)));
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -84,9 +103,9 @@ public final class AiConnection {
                 if (raw == null || raw.length() > 8192) throw new IllegalStateException();
                 for (String pair : raw.split("&")) { String[] kv = pair.split("=", 2); if (kv.length == 2) query.put(kv[0], URLDecoder.decode(kv[1], StandardCharsets.UTF_8)); }
                 if (!state.equals(query.get("state")) || !query.containsKey("code")) throw new IllegalStateException();
-                tokens(settings, "grant_type=authorization_code&client_id=" + enc(settings.clientId) + "&code=" + enc(query.get("code")) + "&redirect_uri=" + enc(redirect) + "&code_verifier=" + enc(verifier));
+                finishLogin(loginScope,server,settings, "grant_type=authorization_code&client_id=" + enc(settings.clientId) + "&code=" + enc(query.get("code")) + "&redirect_uri=" + enc(redirect) + "&code_verifier=" + enc(verifier));
                 result = "Signed in. You can close this tab and return to Minecraft.";
-                status.accept("TokenNest 登录成功（令牌仅保存在本次游戏内存中）。");
+                status.accept("TokenNest 登录成功，已保存到本机当前世界的凭据库。");
             } catch (Exception e) { status.accept("TokenNest 授权失败或已过期，请重试；未输出令牌或服务端响应。"); }
             byte[] bytes = result.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");
@@ -99,6 +118,10 @@ public final class AiConnection {
         return URI.create(NEST + "/oauth/authorize?response_type=code&client_id=" + enc(settings.clientId)
             + "&redirect_uri=" + enc(redirect) + "&scope=" + enc("api offline_access") + "&state=" + state + "&code_challenge=" + challenge + "&code_challenge_method=S256");
     }
+    private synchronized void finishLogin(String expected,HttpServer server,ClientSettings settings,String form)throws Exception{
+        if(!java.util.Objects.equals(scope,expected)||callback!=server)throw new IllegalStateException("登录世界已改变");
+        tokens(settings,form);
+    }
     private synchronized void tokens(ClientSettings s, String form) throws Exception {
         HttpRequest request = HttpRequest.newBuilder(URI.create(NEST + "/api/oauth2/token")).timeout(Duration.ofSeconds(25))
             .header("Content-Type", "application/x-www-form-urlencoded").POST(HttpRequest.BodyPublishers.ofString(form)).build();
@@ -108,6 +131,7 @@ public final class AiConnection {
         access = newAccess; apiKey = "";
         if (o.has("refresh_token")) refresh = o.get("refresh_token").getAsString();
         expires = System.currentTimeMillis() + Math.min(o.has("expires_in") ? o.get("expires_in").getAsLong() : 3600, 86400) * 1000;
+        persist();
     }
     private static String enc(String s) { return URLEncoder.encode(s, StandardCharsets.UTF_8); }
     private static String random() { byte[] b = new byte[32]; new SecureRandom().nextBytes(b); return Base64.getUrlEncoder().withoutPadding().encodeToString(b); }

@@ -25,3 +25,4 @@ tasks.register('compileBundledPi', Exec) {
 }
 sourceSets.main.resources.srcDir(layout.buildDirectory.dir('generated/pi'))
 tasks.named('processResources') { dependsOn 'compileBundledPi' }
+tasks.named('sourcesJar') { dependsOn 'compileBundledPi'; exclude 'aibotassist/pi/**' }

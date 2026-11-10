@@ -1,4 +1,4 @@
-> 最新源码新增多材料、英简中设置界面、按模式方块黑名单及门/床/液体/受控容器NBT，见 [BLOCK_POLICY.md](BLOCK_POLICY.md)。这些改动尚未重打发布JAR。
+> 最新源码新增多材料、英简中设置界面、按模式方块黑名单及门/床/液体/受控容器NBT，见 [BLOCK_POLICY.md](BLOCK_POLICY.md)。这些改动已包含在0.2.0。
 
 # AI Bot Assist — 一体化依赖构建
 
@@ -26,6 +26,14 @@ $env:JAVA_HOME='D:\Program Files\Java\jdk-21'
 .\gradlew.bat build
 ```
 
-发布产物：fabric/build/libs/aibotassist-fabric-0.1.1.jar、neoforge/build/libs/aibotassist-neoforge-0.1.1.jar。本轮为内嵌验证构建，版本号未递增，请勿与之前同名旧包混淆。
+发布产物：fabric/build/libs/aibotassist-fabric-0.2.0.jar、neoforge/build/libs/aibotassist-neoforge-0.2.0.jar。0.2.0为本次完整构建，安装前移除旧版本JAR。
 
 验证记录见 [VERIFICATION.md](VERIFICATION.md)。
+
+## 0.2.0 本地凭据
+
+API密钥及TokenNest access/refresh token保存在玩家电脑客户端 `config/aibotassist/private/`，采用AES-256-GCM加密及世界绑定AAD；`local.key`为同机解密密钥，密文以哈希文件名隔离，不含可读世界路径。单人绑定存档绝对路径，联机绑定连接地址，再结合登录玩家UUID。不同维度共享同世界记录；多人服务器内部更换世界无法由客户端可靠识别，仍按服务器地址区分。
+
+进入世界加载，离开清理内存，刷新令牌后更新保存；修改API地址或OAuth client_id清除当前内存授权，不能把旧服务商令牌带到新端点。设置中“清除当前世界凭据”删除该世界本地记录，不影响其它记录。退出游戏不会删除已保存记录。OAuth浏览器回调绑定发起世界，切换世界后不接受旧登录结果。
+
+密钥从不传到Minecraft服务器、Pi进程或世界存档。不要分享整个config目录及local.key。加密密钥与密文都在本机，因此不能抵抗同系统账号恶意程序/文件窃取；Windows使用系统继承ACL，Unix尽力设为仅所有者权限，尚未使用系统凭据管理器。保存失败会报错，不宣称已持久保存。存档移动或服务器换地址会视为新作用域，需重新填写。

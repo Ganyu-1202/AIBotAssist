@@ -161,3 +161,13 @@
 - 新增SpecialPlacement.matches：玻璃板/栅栏/CrossCollision及墙忽略邻接连接状态，楼梯忽略自动shape；类型、朝向等其他状态仍严格。执行、验证、修复统一使用。
 - repair预期占用拒绝转明确rejected回执，不再未知诊断异常；实际放置/拆除/命令计数独立，消除已造房仍报完成0步。
 - 新增2项测试，公共与两加载器源码编译成功，66项JUnit通过。未真实世界重测、未重打发布JAR。
+
+## 0.2.0 完整发布构建
+
+- 新增LocalCredentials本地AES-256-GCM凭据保存，AAD绑定世界作用域，API/OAuth身份绑定端点与client_id；进入/退出客户端世界加载/清理，OAuth及refresh更新保存，清除当前世界不影响其他。
+- 单人存档路径+玩家UUID、多人连接地址+玩家UUID；多人内部世界切换无法可靠识别，明确仅服务器粒度。未使用DPAPI，密钥同目录保存；Windows继承ACL/Unix尽力0600，不能抵抗同用户进程或完整目录盗取。
+- Gradle build完整成功（修复sourcesJar对generated/pi显式依赖），69项JUnit零失败零错误，新增3项加密往返/隔离/删除/篡改测试。
+- Fabric0.2.0：171072161字节，SHA256 4f7b91cca8b3cf9b27e2b1975add06b65030cf7f48aadd214fd55f461243e2bb。
+- NeoForge0.2.0：168665632字节，SHA256 b0efb368eac51b2e0bee55d49ae08d0a605ae0a91a0729a6b30cab6546152480。
+- 两包元数据0.2.0、LocalCredentials类、五平台Pi程序哈希均逐个核验。日志.dev/build-0.2.0.log。
+- 未游戏内验证世界切换/OAuth回调/真实刷新恢复；先前单元/离线SDK证据不能等同全功能联机实测。
