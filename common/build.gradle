@@ -1,0 +1,7 @@
+architectury { common('fabric', 'neoforge') }
+dependencies {
+    modImplementation 'net.fabricmc:fabric-loader:0.16.10'
+    modApi 'dev.architectury:architectury:13.0.8'
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}

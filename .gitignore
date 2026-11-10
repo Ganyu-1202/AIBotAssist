@@ -1,0 +1,7 @@
+.gradle/
+**/build/
+**/run/
+.dev/
+.idea/
+*.iml
+**/aibotassist-private*

@@ -1,0 +1,24 @@
+plugins {
+    id 'architectury-plugin' version '3.4.164'
+    id 'dev.architectury.loom' version '1.7.416' apply false
+    id 'com.github.johnrengelman.shadow' version '8.1.1' apply false
+}
+architectury { minecraft = '1.21.1' }
+allprojects {
+    apply plugin: 'java'
+    apply plugin: 'architectury-plugin'
+    group = 'top.goldgom.aibotassist'
+    version = '0.1.0'
+    repositories { mavenCentral(); maven { url 'https://maven.neoforged.net/releases/' } }
+    java { toolchain.languageVersion = JavaLanguageVersion.of(21); withSourcesJar() }
+    tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8'; options.release = 21 }
+    tasks.withType(Test).configureEach { useJUnitPlatform() }
+}
+subprojects {
+    apply plugin: 'dev.architectury.loom'
+    loom { silentMojangMappingsLicense() }
+    dependencies {
+        minecraft 'com.mojang:minecraft:1.21.1'
+        mappings loom.officialMojangMappings()
+    }
+}
