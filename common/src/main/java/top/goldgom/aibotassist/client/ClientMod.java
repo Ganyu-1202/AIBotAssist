@@ -16,18 +16,23 @@ public final class ClientMod {
     private static String waiting;
     private static long waitSince;
     private static boolean busy;
+    private static int settingsDelay;
+    private static void openSettings() { settingsDelay = 2; }
     public static void init() {
         settings = ClientSettings.load();
+        ClientCommandRegistrationEvent.EVENT.register((dispatcher, context) ->
+            dispatcher.register(ClientCommandRegistrationEvent.literal("aibot")
+                .then(ClientCommandRegistrationEvent.literal("settings").executes(c -> { openSettings(); return 1; }))));
         NetworkManager.registerReceiver(NetworkManager.Side.S2C, Wire.Down.TYPE, Wire.Down.CODEC, (packet, ctx) -> ctx.queue(() -> context(packet.json())));
         ClientChatEvent.SEND.register((message, component) -> {
             String mention = "@" + settings.name;
             if (!message.equals(mention) && !message.startsWith(mention + " ") && !message.startsWith(mention + "　")) return EventResult.pass();
             String prompt = message.substring(mention.length()).trim();
             Minecraft mc = Minecraft.getInstance();
-            if (prompt.isEmpty() || prompt.equals("设置")) { mc.execute(() -> mc.setScreen(new SettingsScreen(mc.screen))); return EventResult.interruptFalse(); }
-            if (prompt.equals("确认")) { if (mc.getConnection() != null) mc.getConnection().sendCommand("aibot confirm"); return EventResult.interruptFalse(); }
+            if (mc.player != null) mc.gui.getChat().addMessage(Component.literal("<" + mc.player.getGameProfile().getName() + "> " + message));
+            if (prompt.isEmpty() || prompt.equals("设置")) { say("请使用 /aibot settings 配置 AI。"); return EventResult.interruptFalse(); }
             if (prompt.equals("取消")) { waiting = null; if (mc.getConnection() != null) mc.getConnection().sendCommand("aibot cancel"); return EventResult.interruptFalse(); }
-            if (!connection.ready() || settings.model.isBlank()) { say("请先在 @" + settings.name + " 设置 中配置模型和登录。"); return EventResult.interruptFalse(); }
+            if (!connection.ready() || settings.model.isBlank()) { say("请先使用 /aibot settings 配置模型和登录。"); return EventResult.interruptFalse(); }
             if (busy || (waiting != null && System.currentTimeMillis() - waitSince < 10_000)) { say("正在处理上一条消息，请稍候。"); return EventResult.interruptFalse(); }
             if (prompt.length() > 2000) { say("消息太长（最多2000字）。"); return EventResult.interruptFalse(); }
             if (!NetworkManager.canServerReceive(Wire.Up.TYPE)) {
@@ -40,8 +45,10 @@ public final class ClientMod {
             }
             return EventResult.interruptFalse();
         });
-        ClientPlayerEvent.CLIENT_PLAYER_QUIT.register(player -> waiting = null);
+        ClientPlayerEvent.CLIENT_PLAYER_QUIT.register(player -> { waiting = null; settingsDelay = 0; });
         ClientTickEvent.CLIENT_POST.register(mc -> {
+            if (settingsDelay > 0 && --settingsDelay == 0 && mc.player != null)
+                mc.setScreen(new SettingsScreen(null));
             if (waiting != null && System.currentTimeMillis() - waitSince >= 10_000) {
                 waiting = null; say("服务器上下文请求超时，请重试。");
             }
@@ -77,8 +84,7 @@ public final class ClientMod {
                         JsonObject packet = new JsonObject(); packet.addProperty("action", "plan"); packet.addProperty("id", context.get("id").getAsString());
                         packet.addProperty("plan", AIBotAssist.JSON.toJson(new Plan("", plan.blocks(), plan.commands(), plan.removals())));
                         NetworkManager.sendToServer(new Wire.Up(packet.toString()));
-                        mc.player.displayClientMessage(Component.literal("[确认执行任务]").withStyle(s -> s.withColor(0x55FF55).withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/aibot confirm")))
-                            .append(Component.literal("  [取消]").withStyle(s -> s.withColor(0xFF5555).withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/aibot cancel")))), false);
+                        say("任务已提交，服务器检查通过后自动执行。");
                     }
                 });
             } catch (Exception e) {

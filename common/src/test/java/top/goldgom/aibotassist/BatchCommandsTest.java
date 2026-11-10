@@ -7,8 +7,8 @@ class BatchCommandsTest {
         var list=List.of(new Plan.Placement(1,0,3,"minecraft:stone"),new Plan.Placement(2,0,3,"minecraft:stone"),new Plan.Placement(4,0,3,"minecraft:stone"),new Plan.Placement(3,1,3,"minecraft:stone"));
         var runs=BatchCommands.placements(list);
         assertEquals(3,runs.size()); assertEquals(4,runs.stream().mapToInt(BatchCommands.Run::count).sum());
-        assertEquals("fill 11 20 33 12 20 33 minecraft:stone keep",runs.getFirst().command(10,20,30));
-        assertEquals("setblock 14 20 33 minecraft:stone keep",runs.get(1).command(10,20,30));
+        assertEquals("fill 11 20 33 12 20 33 minecraft:stone replace",runs.getFirst().command(10,20,30));
+        assertEquals("setblock 14 20 33 minecraft:stone replace",runs.get(1).command(10,20,30));
     }
     @Test void doesNotMergeDifferentMaterials() {
         assertEquals(2,BatchCommands.placements(List.of(new Plan.Placement(1,0,0,"minecraft:stone"),new Plan.Placement(2,0,0,"minecraft:glass"))).size());

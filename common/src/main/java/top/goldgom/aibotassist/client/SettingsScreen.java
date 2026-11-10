@@ -26,7 +26,11 @@ public final class SettingsScreen extends Screen {
         key.setFormatter((text, offset) -> FormattedCharSequence.forward("•".repeat(text.length()), net.minecraft.network.chat.Style.EMPTY));
         proxy = field(y + 112, "HTTP 代理（可空）", s.proxy, 200);
         clientId = field(y + 140, "OAuth client_id", s.clientId, 200);
-        addRenderableWidget(Button.builder(Component.literal("保存"), b -> save()).bounds(width/2-200,y+174,125,20).build());
+        addRenderableWidget(Button.builder(Component.literal("完成"), b -> {
+            if (!save()) return;
+            onClose();
+            ClientMod.say("设置已保存；聊天栏直接 @" + ClientMod.settings.name + " 你好。");
+        }).bounds(width/2-200,y+174,125,20).build());
         addRenderableWidget(Button.builder(Component.literal("TokenNest 登录"), b -> {
             if (!save()) return;
             try { var uri = ClientMod.connection.login(ClientMod.settings, ClientMod::say); Util.getPlatform().openUri(uri); status = "请在浏览器授权，3分钟内完成。"; }

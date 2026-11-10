@@ -22,11 +22,13 @@ public final class BuildService {
         Job(Pending pending) { this.pending = pending; }
     }
     private static final Map<UUID, Request> requests = new HashMap<>();
-    private static final Map<UUID, Pending> pending = new HashMap<>();
     private static final Map<UUID, Job> jobs = new HashMap<>();
     private static final Map<UUID, Long> cooldowns = new HashMap<>();
+    private static final class Rejected extends RuntimeException {
+        Rejected(String reason) { super(reason); }
+    }
     private static long now() { return System.currentTimeMillis(); }
-    public static void clear() { requests.clear(); pending.clear(); jobs.clear(); cooldowns.clear(); }
+    public static void clear() { requests.clear(); jobs.clear(); cooldowns.clear(); }
     public static void tell(ServerPlayer p, String message) { p.sendSystemMessage(Component.literal("[AI] " + message)); }
     private static void send(ServerPlayer p, JsonObject o) { NetworkManager.sendToPlayer(p, new Wire.Down(o.toString())); }
     public static void receive(ServerPlayer p, String json) {
@@ -37,7 +39,6 @@ public final class BuildService {
                 if (jobs.containsKey(p.getUUID())) { tell(p, "已有任务执行中，请先取消。"); return; }
                 if (now() - cooldowns.getOrDefault(p.getUUID(), 0L) < 3000) return;
                 cooldowns.put(p.getUUID(), now());
-                pending.remove(p.getUUID());
                 Request r = new Request(UUID.randomUUID().toString(), p.blockPosition(), p.serverLevel().dimension().location().toString(), now() + 120_000);
                 requests.put(p.getUUID(), r);
                 JsonObject reply = new JsonObject();
@@ -55,6 +56,7 @@ public final class BuildService {
                 counts.forEach(inventory::addProperty); reply.add("inventory", inventory);
                 send(p, reply);
             } else if (action.equals("plan")) {
+                if (jobs.containsKey(p.getUUID())) { tell(p, "已有任务执行中，请先取消。"); return; }
                 Request r = requests.remove(p.getUUID());
                 if (r == null || r.expires < now() || !r.id.equals(o.get("id").getAsString())) return;
                 Plan plan = Plan.parse(o.get("plan").getAsString());
@@ -64,15 +66,16 @@ public final class BuildService {
                 for (var b : plan.removals()) { var pos = r.origin.offset(b.x(), b.y(), b.z()); removalStates.put(pos, p.serverLevel().getBlockState(pos)); }
                 Pending task = new Pending(r, plan, now() + 60_000, Map.copyOf(removalStates));
                 validate(p, task);
-                pending.put(p.getUUID(), task);
+                jobs.put(p.getUUID(), new Job(task));
                 if (!plan.commands().isEmpty()) {
                     tell(p, "AI 提交 " + plan.commands().size() + " 条命令（按你的当前权限执行，不提升 OP）：");
                     for (String command : plan.commands()) tell(p, "/" + command);
                     tell(p, "命令可能改变世界或影响其他玩家，执行后不自动撤销。");
                 } else tell(p, "方案包含 " + plan.blocks().size() + " 个放置、" + plan.removals().size() + " 个拆除；原点 " + r.origin.toShortString() + "。材料：" + plan.materials());
-                tell(p, "60 秒内点击确认或 @AI 确认；也可 /aibot confirm。取消用 /aibot cancel。");
+                tell(p, "检查通过，任务将自动执行。取消排队/后续操作可用 /aibot cancel；已执行部分不会自动撤销。");
             }
-        } catch (Exception e) { tell(p, "请求被拒绝：方案无效、命令被禁止/无权限、材料不足或目标区域不允许。"); }
+        } catch (Rejected e) { tell(p, "请求被拒绝：" + e.getMessage()); }
+        catch (Exception e) { tell(p, "请求被拒绝：方案格式或命令无效；请简化请求重试。未执行操作。"); }
     }
     private static BlockState state(Plan.Placement b) {
         return BuiltInRegistries.BLOCK.get(ResourceLocation.parse(b.block())).defaultBlockState();
@@ -84,11 +87,22 @@ public final class BuildService {
     }
     private static void target(ServerPlayer p, BlockPos pos, BlockState state) {
         var level = p.serverLevel();
-        if (level.isOutsideBuildHeight(pos) || !level.hasChunkAt(pos) || !level.getWorldBorder().isWithinBounds(pos)
-            || !level.getBlockState(pos).isAir() || !level.mayInteract(p, pos) || !p.mayBuild()
-            || !level.getEntities(null, new net.minecraft.world.phys.AABB(pos)).isEmpty()
-            || BlockEvent.PLACE.invoker().placeBlock(level, pos, state, p).isFalse())
-            throw new IllegalStateException("区域不可建造");
+        String at = "（" + pos.toShortString() + "）";
+        if (level.isOutsideBuildHeight(pos)) throw new Rejected("目标超出建造高度" + at);
+        if (!level.hasChunkAt(pos)) throw new Rejected("目标区块尚未加载" + at);
+        if (!level.getWorldBorder().isWithinBounds(pos)) throw new Rejected("目标超出世界边界" + at);
+        BlockState existing = level.getBlockState(pos);
+        if (!existing.isAir() && (!existing.canBeReplaced() || !existing.getFluidState().isEmpty() || level.getBlockEntity(pos) != null))
+            throw new Rejected("目标被 " + BuiltInRegistries.BLOCK.getKey(existing.getBlock()) + " 占用" + at + "；请指定空地或先要求拆除");
+        if (!level.mayInteract(p, pos)) throw new Rejected("出生点或区域保护不允许操作" + at);
+        if (!p.mayBuild()) throw new Rejected("当前游戏模式不允许建造" + at);
+        var shape = state.getCollisionShape(level, pos);
+        if (!shape.isEmpty() && !level.getEntities(p, shape.bounds().move(pos), e -> e instanceof net.minecraft.world.entity.LivingEntity && !e.isSpectator()).isEmpty())
+            throw new Rejected("目标位置有玩家或生物" + at);
+        if (!shape.isEmpty() && shape.bounds().move(pos).intersects(p.getBoundingBox()))
+            throw new Rejected("目标位置与你重叠" + at + "；请移开后重试");
+        if (BlockEvent.PLACE.invoker().placeBlock(level, pos, state, p).isFalse())
+            throw new Rejected("区域保护模组拒绝放置" + at);
     }
     private static void validate(ServerPlayer p, Pending task) {
         location(p, task);
@@ -103,7 +117,7 @@ public final class BuildService {
                     ItemStack s = p.getInventory().getItem(i);
                     if (s.is(item) && s.getComponentsPatch().isEmpty()) count += s.getCount();
                 }
-                if (count < e.getValue()) throw new IllegalStateException("材料不足");
+                if (count < e.getValue()) throw new Rejected("生存材料不足：" + e.getKey() + " 需要 " + e.getValue() + "，库存 " + count);
             }
         }
     }
@@ -195,14 +209,8 @@ public final class BuildService {
         if (parsed.getReader().canRead() || !parsed.getExceptions().isEmpty()) throw new IllegalArgumentException("命令参数错误或无权限");
         return parsed;
     }
-    public static void confirm(ServerPlayer p) {
-        Pending t = pending.remove(p.getUUID());
-        if (t == null || t.expires < now()) { tell(p, "没有可确认的方案或方案已过期。"); return; }
-        try { validate(p, t); jobs.put(p.getUUID(), new Job(t)); tell(p, t.plan.commands().isEmpty() ? "即将一次性执行方块任务：整批检查材料，拆除按原版规则掉落；执行后不自动撤销。" : "开始执行命令；失败会停止后续命令，已执行部分不会自动撤销。"); }
-        catch (Exception e) { tell(p, "确认失败：检查模式、库存、站位及目标区域。"); }
-    }
     public static void cancel(ServerPlayer p) {
-        requests.remove(p.getUUID()); pending.remove(p.getUUID()); jobs.remove(p.getUUID()); tell(p, "已取消，已建造部分保留。");
+        requests.remove(p.getUUID()); jobs.remove(p.getUUID()); tell(p, "已取消，已建造部分保留。");
     }
     public static void tick(MinecraftServer server) {
         int budget = 32;
@@ -234,7 +242,6 @@ public final class BuildService {
         }
         long time = now();
         requests.values().removeIf(r -> r.expires < time);
-        pending.values().removeIf(r -> r.expires < time);
         cooldowns.entrySet().removeIf(e -> time - e.getValue() > 120_000);
     }
 }

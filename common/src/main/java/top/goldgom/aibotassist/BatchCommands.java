@@ -7,8 +7,8 @@ public final class BatchCommands {
     public record Run(int x, int y, int z, int endX, String block, int count) {
         public String command(int ox, int oy, int oz) {
             String start = (ox+x)+" "+(oy+y)+" "+(oz+z);
-            return count == 1 ? "setblock "+start+" "+block+" keep"
-                : "fill "+start+" "+(ox+endX)+" "+(oy+y)+" "+(oz+z)+" "+block+" keep";
+            return count == 1 ? "setblock "+start+" "+block+" replace"
+                : "fill "+start+" "+(ox+endX)+" "+(oy+y)+" "+(oz+z)+" "+block+" replace";
         }
     }
     private BatchCommands() {}

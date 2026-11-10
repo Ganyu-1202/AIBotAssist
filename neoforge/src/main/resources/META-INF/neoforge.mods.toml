@@ -3,7 +3,7 @@ loaderVersion="[4,)"
 license="MIT"
 [[mods]]
 modId="aibotassist"
-version="0.1.0"
+version="0.1.1"
 displayName="AI Bot Assist"
 [[dependencies.aibotassist]]
 modId="neoforge"
