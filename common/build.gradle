@@ -8,8 +8,13 @@ dependencies {
 
 // Build-time only: players receive standalone executables embedded as resources.
 def piRoot = rootProject.file('agent-runtime')
-def npmBun = new File(System.getenv('APPDATA') ?: '', 'npm/node_modules/bun/bin/bun.exe')
-def bunBinary = providers.gradleProperty('bunExecutable').getOrElse(npmBun.isFile() ? npmBun.absolutePath : 'bun')
+def bunCandidates = [
+        new File(System.getenv('APPDATA') ?: '', 'npm/node_modules/bun/bin/bun.exe'),
+        new File(System.getenv('ProgramFiles') ?: '', 'nodejs/node_modules/bun/bin/bun.exe'),
+        new File(System.getenv('BUN_INSTALL') ?: '', 'bin/bun.exe')
+]
+def detectedBun = bunCandidates.find { it.isFile() }?.absolutePath
+def bunBinary = providers.gradleProperty('bunExecutable').getOrElse(detectedBun ?: 'bun')
 tasks.register('prepareBundledPi', Exec) {
     workingDir piRoot
     commandLine bunBinary, 'install', '--frozen-lockfile'

@@ -32,6 +32,9 @@ $env:JAVA_HOME='D:\Program Files\Java\jdk-21'
 
 ## 0.2.0 本地凭据
 
+TokenNest OAuth 的默认 client_id、回调 URI、scopes 和后台创建请求见 [登录配置](docs/TOKENNEST_LOGIN.md)。
+游戏设置支持直接发起登录、查看授权状态、取消等待和复制服务器注册参数。
+
 API密钥及TokenNest access/refresh token保存在玩家电脑客户端 `config/aibotassist/private/`，采用AES-256-GCM加密及世界绑定AAD；`local.key`为同机解密密钥，密文以哈希文件名隔离，不含可读世界路径。单人绑定存档绝对路径，联机绑定连接地址，再结合登录玩家UUID。不同维度共享同世界记录；多人服务器内部更换世界无法由客户端可靠识别，仍按服务器地址区分。
 
 进入世界加载，离开清理内存，刷新令牌后更新保存；修改API地址或OAuth client_id清除当前内存授权，不能把旧服务商令牌带到新端点。设置中“清除当前世界凭据”删除该世界本地记录，不影响其它记录。退出游戏不会删除已保存记录。OAuth浏览器回调绑定发起世界，切换世界后不接受旧登录结果。

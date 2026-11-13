@@ -3,7 +3,7 @@ import com.google.gson.*;
 import java.util.*;
 
 public final class AgentToolCatalog {
-    public static final Set<String> NAMES=Set.of("inspect_area","inspect_inventory","query_recipes","plan_resources","find_workstations","craft_items","process_items","get_task_status","verify_result","preview_task","build_structure","repair_structure","cancel_task","get_operation_history","manage_waypoints","inspect_entities","query_game_rules");
+    public static final Set<String> NAMES=Set.of("inspect_area","inspect_inventory","query_recipes","plan_resources","find_workstations","craft_items","process_items","get_task_status","verify_result","preview_task","build_structure","repair_structure","cancel_task","get_operation_history","manage_waypoints","inspect_entities","query_game_rules","run_commands");
     public static void append(JsonArray tools) {
         add(tools,"inspect_area","有限范围地形/遮挡/访问状态查询，不读容器内容。","radius:integer,x:integer,y:integer,z:integer");
         add(tools,"inspect_inventory","查询提问者库存及工具耐久。","");
@@ -22,6 +22,14 @@ public final class AgentToolCatalog {
         add(tools,"manage_waypoints","个人标记 action=list/set/delete，set为当前脚下；name只用汉字字母数字_-/32字。","action:string,name:string");
         add(tools,"inspect_entities","附近生物类型、距离和敌对性，不自动攻击。","");
         add(tools,"query_game_rules","读取当前维度、时间、天气与相关规则。","");
+        addCommands(tools);
+    }
+    private static void addCommands(JsonArray tools) {
+        JsonObject properties=new JsonObject();
+        JsonObject token=new JsonObject();token.addProperty("type","string");properties.add("token",token);
+        JsonObject commands=new JsonObject();commands.addProperty("type","array");commands.addProperty("minItems",1);commands.addProperty("maxItems",CommandPolicy.MAX_COMMANDS);JsonObject item=new JsonObject();item.addProperty("type","string");commands.add("items",item);properties.add("commands",commands);
+        JsonObject schema=new JsonObject();schema.addProperty("type","object");schema.add("properties",properties);JsonArray required=new JsonArray();required.add("token");required.add("commands");schema.add("required",required);schema.addProperty("additionalProperties",false);
+        JsonObject f=new JsonObject();f.addProperty("name","run_commands");f.addProperty("description","执行玩家有权限的原版命令，最多8条；必须先observe_world取得token。适合输入指令、修改gamerule、时间、天气、传送等；不提升权限，不执行被禁止命令。每条命令可带或不带开头斜杠。 ");f.add("parameters",schema);JsonObject t=new JsonObject();t.addProperty("type","function");t.add("function",f);tools.add(t);
     }
     private static void add(JsonArray tools,String name,String desc,String fields) {
         JsonObject properties=new JsonObject();for(String field:fields.split(",")) {if(field.isBlank())continue;String[] pair=field.split(":");JsonObject type=new JsonObject();type.addProperty("type",pair[1]);if(pair[1].equals("array")){JsonObject item=new JsonObject();item.addProperty("type","integer");type.add("items",item);}properties.add(pair[0],type);}
@@ -35,6 +43,7 @@ public final class AgentToolCatalog {
             case "preview_task" -> List.of("token","plan");
             case "repair_structure" -> List.of("token","task_id");
             case "get_task_status","cancel_task","verify_result" -> List.of("task_id");
+            case "run_commands" -> List.of("token","commands");
             case "query_recipes" -> List.of("item");
             case "process_items" -> List.of("device");
             default -> List.of();
@@ -46,6 +55,12 @@ public final class AgentToolCatalog {
         if(tool.equals("build_structure")) {
             for(String key:List.of("width","depth","height"))try{args.get(key).getAsBigDecimal().intValueExact();}catch(Exception e){throw new IllegalArgumentException(key+"必须为整数");}
             fallbackMaterial(args);
+        }
+        if(tool.equals("run_commands")) {
+            if(!args.get("commands").isJsonArray())throw new IllegalArgumentException("commands必须为数组");
+            var commands=args.getAsJsonArray("commands");
+            if(commands.isEmpty()||commands.size()>CommandPolicy.MAX_COMMANDS)throw new IllegalArgumentException("commands数量必须1到"+CommandPolicy.MAX_COMMANDS);
+            for(var command:commands)if(!command.isJsonPrimitive()||!command.getAsJsonPrimitive().isString())throw new IllegalArgumentException("commands中的每项必须是字符串");
         }
     }
     public static String fallbackMaterial(JsonObject args) {

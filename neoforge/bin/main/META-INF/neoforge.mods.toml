@@ -1,0 +1,25 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+[[mods]]
+modId="aibotassist"
+version="0.2.0"
+displayName="AI Bot Assist"
+[[dependencies.aibotassist]]
+modId="neoforge"
+type="required"
+versionRange="[21.1.172,)"
+ordering="NONE"
+side="BOTH"
+[[dependencies.aibotassist]]
+modId="minecraft"
+type="required"
+versionRange="[1.21.1,1.21.2)"
+ordering="NONE"
+side="BOTH"
+[[dependencies.aibotassist]]
+modId="architectury"
+type="required"
+versionRange="[13.0.8,)"
+ordering="AFTER"
+side="BOTH"

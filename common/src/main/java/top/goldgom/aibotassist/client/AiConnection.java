@@ -10,20 +10,24 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Consumer;
-import top.goldgom.aibotassist.Plan;
 
 /** Secrets remain client-local and are never logged or sent to Minecraft/Pi. */
 public final class AiConnection {
-    public static final String NEST = "https://openai.goldgom.top";
+    public static final String NEST = TokenNestOAuth.ISSUER;
     private volatile String apiKey = "", access = "", refresh = "";
     private volatile long expires;
     private volatile HttpServer callback;
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(r -> { Thread t = new Thread(r, "aibot-oauth-timeout"); t.setDaemon(true); return t; });
     private String scope, boundEndpoint="",boundClientId="";
-    private final LocalCredentials store=new LocalCredentials(dev.architectury.platform.Platform.getConfigFolder().resolve("aibotassist/private"));
+    private final LocalCredentials store;
+    @FunctionalInterface interface TokenRequest { JsonObject request(ClientSettings settings,String form) throws Exception; }
+    private final TokenRequest tokenRequest;
+    public AiConnection() { this(new LocalCredentials(dev.architectury.platform.Platform.getConfigFolder().resolve("aibotassist/private"))); }
+    AiConnection(LocalCredentials store) { this(store,AiConnection::requestTokens); }
+    AiConnection(LocalCredentials store,TokenRequest tokenRequest) { this.store=store;this.tokenRequest=tokenRequest; }
     public synchronized void enter(String identity,ClientSettings settings) {
         logout();scope=LocalCredentials.scope(identity);boundEndpoint=settings.baseUrl;boundClientId=settings.clientId;
-        try{var saved=store.load(scope);if(saved!=null&&saved.endpoint().equals(settings.baseUrl)&&saved.clientId().equals(settings.clientId)){
+        try{var saved=store.load(scope);if(saved!=null&&saved.endpoint().equals(settings.baseUrl)&&(saved.clientId().equals(settings.clientId)||(saved.access().isBlank()&&saved.refresh().isBlank()))){
             apiKey=saved.apiKey();access=saved.access();refresh=saved.refresh();expires=saved.expires();
         }}catch(Exception e){ClientMod.say("无法读取当前世界的本地凭据，请重新填写；未输出敏感数据。");}
     }
@@ -35,11 +39,14 @@ public final class AiConnection {
         try{store.save(scope,new LocalCredentials.Secret(apiKey,access,refresh,expires,boundEndpoint,boundClientId));}
         catch(Exception e){throw new IllegalStateException("本地凭据保存失败",e);}
     }
-    public synchronized void setKey(String key) {apiKey=key.trim();access="";refresh="";expires=0;persist();}
+    public synchronized void setKey(String key) {clearMemory();apiKey=key.trim();persist();}
     private void clearMemory(){apiKey="";access="";refresh="";expires=0;if(callback!=null){callback.stop(0);callback=null;}}
     public synchronized void logout(){clearMemory();scope=null;}
     public synchronized void forget(){try{if(scope!=null)store.delete(scope);}catch(Exception e){throw new IllegalStateException("无法删除本地凭据",e);}clearMemory();}
     public boolean ready(){return !apiKey.isBlank()||!access.isBlank()||!refresh.isBlank();}
+    public synchronized boolean loginPending(){return callback!=null;}
+    public synchronized String authStatus(){return callback!=null?"auth_pending":!access.isBlank()||!refresh.isBlank()?"auth_logged_in":!apiKey.isBlank()?"auth_api_key":"auth_signed_out";}
+    public synchronized void cancelLogin(){if(callback!=null){callback.stop(0);callback=null;}}
     private static HttpClient client(String proxy) {
         HttpClient.Builder b = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).followRedirects(HttpClient.Redirect.NEVER);
         if (!proxy.isBlank()) {
@@ -65,6 +72,8 @@ public final class AiConnection {
     }
     private synchronized String bearer(ClientSettings settings) throws Exception {
         if (access.isBlank()&&refresh.isBlank()) return apiKey;
+        TokenNestOAuth.requireApi(settings.baseUrl);
+        if(!boundClientId.equals(settings.clientId)||!boundEndpoint.equals(settings.baseUrl))throw new IllegalStateException("登录配置已改变，请重新登录");
         if (expires <= System.currentTimeMillis() + 30_000) {
             if (refresh.isBlank()) throw new IllegalStateException("请重新登录");
             tokens(settings, "grant_type=refresh_token&refresh_token=" + enc(refresh) + "&client_id=" + enc(settings.clientId));
@@ -73,7 +82,6 @@ public final class AiConnection {
     }
     public JsonObject agentTurn(ClientSettings settings, JsonArray messages, JsonArray tools) throws Exception {
         URI base=endpoint(settings.baseUrl);
-        if (!access.isBlank() && !base.toString().equals(NEST+"/v1")) throw new IllegalStateException("TokenNest令牌不能发送到其他地址");
         String token=bearer(settings);
         if(token.isBlank())throw new IllegalStateException("请先登录或配置密钥");
         JsonObject body=new JsonObject();body.addProperty("model",settings.model);body.add("messages",messages);
@@ -86,52 +94,77 @@ public final class AiConnection {
         return reply.getAsJsonArray("choices").get(0).getAsJsonObject().getAsJsonObject("message");
     }
     public synchronized URI login(ClientSettings settings, Consumer<String> status) throws Exception {
+        if (scope == null) throw new IllegalStateException("请进入游戏世界后再登录 TokenNest");
+        TokenNestOAuth.requireApi(settings.baseUrl);
+        configure(settings);
         if (settings.clientId.isBlank()) throw new IllegalStateException("请先填写注册的 TokenNest OAuth client_id");
         if (callback != null) throw new IllegalStateException("登录已在等待浏览器授权");
         String loginScope=scope;
         String verifier = random(), state = random();
-        String challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII)));
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        String redirect = "http://127.0.0.1:" + server.getAddress().getPort() + "/callback";
+        String redirect = TokenNestOAuth.redirect(server.getAddress().getPort());
         callback = server;
-        server.createContext("/callback", exchange -> {
+        server.createContext(TokenNestOAuth.CALLBACK_PATH, exchange -> {
+            Map<String, String> query;
+            try {
+                if (callback != server || !"GET".equals(exchange.getRequestMethod()) || !TokenNestOAuth.CALLBACK_PATH.equals(exchange.getRequestURI().getPath())) throw new IllegalArgumentException();
+                query = TokenNestOAuth.callbackQuery(exchange.getRequestURI().getRawQuery(), state);
+            } catch (IllegalArgumentException invalid) {
+                callbackResponse(exchange, 400, "Invalid callback. Continue authorization in the original browser tab.");
+                return; // Stray or forged requests must not consume the legitimate login session.
+            }
             String result = "Authorization failed. Return to Minecraft.";
             try {
-                if (callback != server || !"GET".equals(exchange.getRequestMethod()) || !"/callback".equals(exchange.getRequestURI().getPath())) throw new IllegalStateException();
-                Map<String, String> query = new HashMap<>();
-                String raw = exchange.getRequestURI().getRawQuery();
-                if (raw == null || raw.length() > 8192) throw new IllegalStateException();
-                for (String pair : raw.split("&")) { String[] kv = pair.split("=", 2); if (kv.length == 2) query.put(kv[0], URLDecoder.decode(kv[1], StandardCharsets.UTF_8)); }
-                if (!state.equals(query.get("state")) || !query.containsKey("code")) throw new IllegalStateException();
-                finishLogin(loginScope,server,settings, "grant_type=authorization_code&client_id=" + enc(settings.clientId) + "&code=" + enc(query.get("code")) + "&redirect_uri=" + enc(redirect) + "&code_verifier=" + enc(verifier));
-                result = "Signed in. You can close this tab and return to Minecraft.";
-                status.accept("TokenNest 登录成功，已保存到本机当前世界的凭据库。");
+                if (query.containsKey("error")) {
+                    result = "Authorization declined. You can close this tab and return to Minecraft.";
+                    status.accept("TokenNest 授权已取消，可重新发起登录。");
+                } else {
+                    finishLogin(loginScope,server,settings, "grant_type=authorization_code&client_id=" + enc(settings.clientId) + "&code=" + enc(query.get("code")) + "&redirect_uri=" + enc(redirect) + "&code_verifier=" + enc(verifier));
+                    result = "Signed in. You can close this tab and return to Minecraft.";
+                    status.accept("TokenNest 登录成功，已保存到本机当前世界的凭据库。");
+                }
             } catch (Exception e) { status.accept("TokenNest 授权失败或已过期，请重试；未输出令牌或服务端响应。"); }
-            byte[] bytes = result.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");
-            exchange.getResponseHeaders().set("Cache-Control", "no-store");
-            exchange.sendResponseHeaders(200, bytes.length); exchange.getResponseBody().write(bytes); exchange.close();
-            server.stop(0); if (callback == server) callback = null;
+            try { callbackResponse(exchange, 200, result); }
+            finally { closeLogin(server); }
         });
         server.start();
-        timer.schedule(() -> { if (callback == server) { server.stop(0); callback = null; status.accept("TokenNest 登录等待超时。"); } }, 180, TimeUnit.SECONDS);
-        return URI.create(NEST + "/oauth/authorize?response_type=code&client_id=" + enc(settings.clientId)
-            + "&redirect_uri=" + enc(redirect) + "&scope=" + enc("api offline_access") + "&state=" + state + "&code_challenge=" + challenge + "&code_challenge_method=S256");
+        timer.schedule(() -> { if (closeLogin(server)) status.accept("TokenNest 登录等待超时。"); }, 180, TimeUnit.SECONDS);
+        return TokenNestOAuth.authorization(settings.clientId,server.getAddress().getPort(),state,verifier);
+    }
+    private synchronized boolean closeLogin(HttpServer server) {
+        if (callback != server) return false;
+        callback = null;server.stop(0);return true;
+    }
+    private static void callbackResponse(com.sun.net.httpserver.HttpExchange exchange,int status,String result) throws java.io.IOException {
+        byte[] bytes=result.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type","text/plain; charset=utf-8");
+        exchange.getResponseHeaders().set("Cache-Control","no-store");
+        exchange.getResponseHeaders().set("Referrer-Policy","no-referrer");
+        exchange.getResponseHeaders().set("X-Content-Type-Options","nosniff");
+        try {exchange.sendResponseHeaders(status,bytes.length);exchange.getResponseBody().write(bytes);}finally{exchange.close();}
     }
     private synchronized void finishLogin(String expected,HttpServer server,ClientSettings settings,String form)throws Exception{
-        if(!java.util.Objects.equals(scope,expected)||callback!=server)throw new IllegalStateException("登录世界已改变");
+        if(!java.util.Objects.equals(scope,expected)||callback!=server||!boundEndpoint.equals(settings.baseUrl)||!boundClientId.equals(settings.clientId))throw new IllegalStateException("登录世界或配置已改变");
         tokens(settings,form);
     }
     private synchronized void tokens(ClientSettings s, String form) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder(URI.create(NEST + "/api/oauth2/token")).timeout(Duration.ofSeconds(25))
-            .header("Content-Type", "application/x-www-form-urlencoded").POST(HttpRequest.BodyPublishers.ofString(form)).build();
-        JsonObject o = read(client(s.proxy).send(request, HttpResponse.BodyHandlers.ofInputStream()), 32_000);
+        TokenNestOAuth.requireApi(s.baseUrl);
+        JsonObject o = tokenRequest.request(s,form);
         String newAccess = o.get("access_token").getAsString();
         if (newAccess.isBlank()) throw new IllegalStateException();
+        if(o.has("token_type")&&!"Bearer".equalsIgnoreCase(o.get("token_type").getAsString()))throw new IllegalStateException("不支持的令牌类型");
+        long lifetime=o.has("expires_in")?o.get("expires_in").getAsBigDecimal().longValueExact():3600;
+        if(lifetime<=0)throw new IllegalStateException("无效令牌有效期");
+        String nextRefresh=o.has("refresh_token")?o.get("refresh_token").getAsString():form.startsWith("grant_type=refresh_token")?refresh:"";
         access = newAccess; apiKey = "";
-        if (o.has("refresh_token")) refresh = o.get("refresh_token").getAsString();
-        expires = System.currentTimeMillis() + Math.min(o.has("expires_in") ? o.get("expires_in").getAsLong() : 3600, 86400) * 1000;
+        refresh = nextRefresh;
+        expires = System.currentTimeMillis() + Math.min(lifetime, 86400) * 1000;
         persist();
+    }
+    private static JsonObject requestTokens(ClientSettings settings,String form) throws Exception {
+        HttpRequest request=HttpRequest.newBuilder(URI.create(NEST+"/api/oauth2/token")).timeout(Duration.ofSeconds(25))
+            .header("Content-Type","application/x-www-form-urlencoded").POST(HttpRequest.BodyPublishers.ofString(form)).build();
+        return read(client(settings.proxy).send(request,HttpResponse.BodyHandlers.ofInputStream()),32_000);
     }
     private static String enc(String s) { return URLEncoder.encode(s, StandardCharsets.UTF_8); }
     private static String random() { byte[] b = new byte[32]; new SecureRandom().nextBytes(b); return Base64.getUrlEncoder().withoutPadding().encodeToString(b); }

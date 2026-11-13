@@ -29,7 +29,7 @@ async function run(init) {
   agent=new Agent({initialState:{systemPrompt:init.system,model,thinkingLevel:'off',tools:init.tools.map(t=>({
     name:t.function.name,label:t.function.name,description:t.function.description,parameters:t.function.parameters,
     execute:async(_id,args)=>{
-      if(['execute_task','build_structure','repair_structure','craft_items','process_items'].includes(t.function.name) && ++executions>8)throw new Error('Execution budget exhausted');
+      if(['execute_task','build_structure','repair_structure','craft_items','process_items','run_commands'].includes(t.function.name) && ++executions>8)throw new Error('Execution budget exhausted');
       const result=await rpc('tool',{name:t.function.name,args});
       if(result.status==='unknown') {agent.abort();throw new Error('Unknown effect; stop without retry');}
       return {content:[{type:'text',text:JSON.stringify(result)}],details:result};

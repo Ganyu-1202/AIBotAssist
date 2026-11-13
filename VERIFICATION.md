@@ -171,3 +171,13 @@
 - NeoForge0.2.0：168665632字节，SHA256 b0efb368eac51b2e0bee55d49ae08d0a605ae0a91a0729a6b30cab6546152480。
 - 两包元数据0.2.0、LocalCredentials类、五平台Pi程序哈希均逐个核验。日志.dev/build-0.2.0.log。
 - 未游戏内验证世界切换/OAuth回调/真实刷新恢复；先前单元/离线SDK证据不能等同全功能联机实测。
+
+## TokenNest 原生客户端登录配置
+
+- 项目默认 client_id 使用用户提供的 `tnc_eqezq1pCPAZ4oOkU90ZEchhiyvFf3Pks`；已有空值/旧占位 `tnc_aibotassist` 自动迁移，保留其他自定义 ID。独立回调路径 `/aibotassist/callback`；集中定义 `api offline_access`、PKCE S256、端点和配置复制文本。
+- 连接页可直接登录并选择 TokenNest API；界面显示授权状态，高级页可取消浏览器登录和复制注册信息。英文/简中键一致，后台创建请求 JSON 与运行时代码配置一致。
+- 无效 state、重复参数、错误路径/方法不会消耗合法授权等待；合法拒绝关闭等待。OAuth access/refresh 均限制用于 TokenNest，切换世界/配置取消旧登录；默认 client_id 的迁移保留已有 API 密钥。
+- `:common:test :fabric:compileJava :neoforge:compileJava` 通过，76 项 JUnit、0 失败、0 错误、0 跳过。其中 6 项 TokenNest 测试覆盖标准 PKCE 向量、回调参数、本机真实 HTTP 回调、模拟令牌端点换码/加密保存/重新进入、跨世界隔离、目标地址限制、已有密钥兼容。
+- 构建使用 `D:\Java\jdk-21`，开发依赖下载使用系统已配置的本机代理；本次源码验证排除 `compileBundledPi`/`prepareBundledPi`，未生成新的完整发行 JAR。
+- 已核对公开 `.well-known/oauth-authorization-server` 元数据和本机 TokenNest 的客户端创建/loopback URI 匹配源码。注册文档见 `docs/TOKENNEST_LOGIN.md`。
+- 已配置用户提供的客户端 ID，尚未验证该客户端的服务端状态，未进行真实账户浏览器授权、真实令牌刷新或游戏内联网验收；模拟端点测试不代表这些真实链路已经验证。

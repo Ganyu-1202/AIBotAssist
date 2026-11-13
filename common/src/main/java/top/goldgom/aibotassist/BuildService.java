@@ -66,7 +66,15 @@ public final class BuildService {
                 if(!AgentToolCatalog.NAMES.contains(tool))throw new Rejected("工具未注册");
                 stage="校验工具参数："+tool;
                 try{AgentToolCatalog.validateArgs(tool,args);}catch(IllegalArgumentException invalid){agentReply(p,call,"rejected",invalid.getMessage());return;}
-                if(tool.equals("preview_task")||tool.equals("build_structure")||tool.equals("repair_structure")) {
+                if(tool.equals("run_commands")) {
+                    Request observed=requests.get(p.getUUID());
+                    if(observed==null||!observed.id.equals(args.get("token").getAsString())){agentReply(p,call,"rejected","观察token无效");return;}
+                    List<String> commands=new ArrayList<>();
+                    for(JsonElement entry:args.getAsJsonArray("commands")) commands.add(CommandPolicy.normalize(entry.getAsString()));
+                    Plan plan=new Plan("执行玩家指令",List.of(),commands,List.of());
+                    o.addProperty("id",observed.id);o.addProperty("plan",AIBotAssist.JSON.toJson(plan));
+                    action="agent_execute";
+                } else if(tool.equals("preview_task")||tool.equals("build_structure")||tool.equals("repair_structure")) {
                     Request observed=requests.get(p.getUUID());
                     if(observed==null||!observed.id.equals(args.get("token").getAsString())){agentReply(p,call,"rejected","观察token无效");return;}
                     Plan plan;

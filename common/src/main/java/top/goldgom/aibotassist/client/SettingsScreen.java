@@ -25,7 +25,7 @@ public final class SettingsScreen extends Screen {
     protected void init() {
         capture();java.util.Arrays.fill(fields,null);
         formWidth=Math.min(400,width-16);left=(width-formWidth)/2;
-        startY=50;rowStep=Math.max(24,Math.min(32,(height-135)/5));
+        startY=50;rowStep=Math.max(20,Math.min(32,(height-135)/5));
         addRenderableWidget(Button.builder(tr("connection"),b->{capture();page=0;rebuildWidgets();}).bounds(left,25,formWidth/2-2,20).build());
         addRenderableWidget(Button.builder(tr("advanced"),b->{capture();page=1;rebuildWidgets();}).bounds(left+formWidth/2+2,25,formWidth/2-2,20).build());
         int first=page==0?0:5,last=page==0?5:8;
@@ -39,13 +39,23 @@ public final class SettingsScreen extends Screen {
         int buttonWidth=(formWidth-6)/2;
         addRenderableWidget(Button.builder(tr("done"),b->{if(!save())return;onClose();ClientMod.say(Component.translatable("aibotassist.settings.saved_chat",ClientMod.settings.name).getString());}).bounds(left,height-28,buttonWidth,20).build());
         addRenderableWidget(Button.builder(tr("cancel"),b->onClose()).bounds(left+buttonWidth+6,height-28,buttonWidth,20).build());
-        if(page==1) {
-            addRenderableWidget(Button.builder(tr("login"),b->{
+        addRenderableWidget(Button.builder(tr("login"),b->{
+                capture();values[1]=TokenNestOAuth.API_BASE;values[3]="";
+                if(fields[1]!=null)fields[1].setValue(values[1]);
+                if(fields[3]!=null)fields[3].setValue("");
                 if(!save())return;
-                try{Util.getPlatform().openUri(ClientMod.connection.login(ClientMod.settings,ClientMod::say));status=tr("auth_wait");}
+                try{Util.getPlatform().openUri(ClientMod.connection.login(ClientMod.settings,message->{
+                    minecraft.execute(()->{status=Component.literal(message);ClientMod.say(message);});
+                }));status=tr("auth_wait");}
                 catch(Exception e){status=tr("auth_error");}
             }).bounds(left,height-77,buttonWidth,20).build());
-            addRenderableWidget(Button.builder(tr("logout"),b->{ClientMod.connection.forget();values[3]="";status=tr("cleared");}).bounds(left+buttonWidth+6,height-77,buttonWidth,20).build());
+        addRenderableWidget(Button.builder(tr("logout"),b->{
+            try{ClientMod.connection.forget();values[3]="";if(fields[3]!=null)fields[3].setValue("");status=tr("cleared");}
+            catch(Exception e){status=tr("clear_error");}
+        }).bounds(left+buttonWidth+6,height-77,buttonWidth,20).build());
+        if(page==1) {
+            addRenderableWidget(Button.builder(tr("copy_oauth"),b->{capture();minecraft.keyboardHandler.setClipboard(TokenNestOAuth.registrationInfo(values[5]));status=tr("copied_oauth");}).bounds(left,height-103,buttonWidth,20).build());
+            addRenderableWidget(Button.builder(tr("cancel_login"),b->{ClientMod.connection.cancelLogin();status=tr("auth_cancelled");}).bounds(left+buttonWidth+6,height-103,buttonWidth,20).build());
         }
     }
     private boolean save(){
@@ -61,7 +71,7 @@ public final class SettingsScreen extends Screen {
         super.render(g,mx,my,dt);g.drawCenteredString(font,title,width/2,8,0xFFFFFF);
         int first=page==0?0:5,last=page==0?5:8;
         for(int i=first;i<last;i++)g.drawString(font,tr(labels[i]),left,startY+(i-first)*rowStep+6,0xDDDDDD);
-        g.drawWordWrap(font,status,left,height-52,formWidth,0xCCCCCC);
+        g.drawWordWrap(font,tr(ClientMod.connection.authStatus()).copy().append(" · ").append(status),left,height-52,formWidth,0xCCCCCC);
     }
     public boolean isPauseScreen(){return false;}
     public void onClose(){values[3]="";if(fields[3]!=null)fields[3].setValue("");minecraft.setScreen(parent);}
