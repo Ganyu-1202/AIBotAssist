@@ -3,6 +3,7 @@
 **/run/
 .dev/
 .idea/
+.vscode/
 *.iml
 **/aibotassist-private*
 **/aibotassist-server-api.json
@@ -12,3 +13,5 @@ agent-runtime/node_modules/
 agent-runtime/dist/
 
 **/aibotassist/private/
+/.architectury-transformer/
+/.agents/
