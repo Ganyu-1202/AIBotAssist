@@ -127,6 +127,12 @@ public final class SpecialPlacement {
                     catch (JsonParseException e) { throw invalid("Invalid CustomName JSON"); }
                 }
                 case "Lock" -> { if (!(tag.get(key) instanceof StringTag)) throw invalid("Lock must be a string"); }
+                case "disabled_slots" -> {
+                    if(!s.is(Blocks.CRAFTER)||!(tag.get(key) instanceof IntArrayTag))throw invalid("disabled_slots requires crafter integer array");
+                    int[] slots=tag.getIntArray(key);Set<Integer> seen=new HashSet<>();
+                    if(slots.length>9)throw invalid("Too many crafter slots");
+                    for(int slot:slots)if(slot<0||slot>8||!seen.add(slot))throw invalid("Invalid crafter slot");
+                }
                 case "Items" -> {
                     if (!creative) throw invalid("Survival cannot create container contents");
                     // Capability rather than block-ID whitelist (chests, hoppers, barrels, modded containers).
@@ -149,6 +155,13 @@ public final class SpecialPlacement {
         if(desired.getBlock() instanceof CrossCollisionBlock || desired.getBlock() instanceof WallBlock)
             derived.addAll(Set.of("north","south","east","west","up"));
         if(desired.getBlock() instanceof StairBlock)derived.add("shape");
+        if(desired.getBlock() instanceof net.minecraft.world.level.block.RedStoneWireBlock)
+            derived.addAll(Set.of("north","south","east","west"));
+        // Runtime electrical/activity states are not placement errors unless explicitly constrained.
+        // Keep structural settings (facing, delay, orientation, mode, half, etc.) strict.
+        if(BuiltInRegistries.BLOCK.getKey(desired.getBlock()).getNamespace().equals("minecraft"))
+            for(String dynamic:Set.of("power","powered","lit","triggered","crafting","enabled","locked"))
+                if(!expected.properties().containsKey(dynamic))derived.add(dynamic);
         for(Property<?> property:desired.getProperties()) {
             if(derived.contains(property.getName()))continue;
             if(!Objects.equals(actual.getValue(property),desired.getValue(property)))return false;
@@ -213,13 +226,12 @@ public final class SpecialPlacement {
     private record Cell(int x, int y, int z) {}
     private static Cell cell(Plan.Placement p) { return new Cell(p.x(), p.y(), p.z()); }
     private static void checkList(List<Plan.Placement> input) {
-        if (input == null || input.size() > Plan.MAX_BLOCKS) throw invalid("Too many placements");
+        if (input == null) throw invalid("Too many placements");
     }
     private static void put(Map<Cell, Plan.Placement> cells, Plan.Placement p) {
         if (p == null || Math.abs((long) p.x()) > Plan.RADIUS || Math.abs((long) p.y()) > Plan.RADIUS || Math.abs((long) p.z()) > Plan.RADIUS)
             throw invalid("Placement outside radius");
         if (cells.putIfAbsent(cell(p), p) != null) throw invalid("Placement collision");
-        if (cells.size() > Plan.MAX_BLOCKS) throw invalid("Expanded placement limit exceeded");
     }
     private static Plan.Placement placement(Plan.Placement p, BlockState s, int x, int y, int z, String nbt) {
         Map<String, String> properties = new TreeMap<>();

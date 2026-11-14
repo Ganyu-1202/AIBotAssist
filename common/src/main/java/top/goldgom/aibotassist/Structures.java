@@ -34,7 +34,6 @@ public final class Structures {
             String chosen=palette.getOrDefault(role,material);
             var block=new Plan.Placement(rx,ry,rz,chosen);map.put(rx+","+ry+","+rz,block);
         }
-        if(map.size()>Plan.MAX_BLOCKS)throw new IllegalArgumentException("结构超过256格，请缩小尺寸");
         return new Plan("生成"+kind,List.copyOf(map.values()));
     }
 }

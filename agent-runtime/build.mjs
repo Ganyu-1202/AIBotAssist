@@ -5,7 +5,7 @@ import { join } from 'node:path';
 const platforms={ 'windows-x64':'bun-windows-x64','linux-x64':'bun-linux-x64','linux-arm64':'bun-linux-arm64','macos-x64':'bun-darwin-x64','macos-arm64':'bun-darwin-arm64' };
 const selected=(process.env.AIBOT_RUNTIME_TARGETS??Object.keys(platforms).join(',')).split(',');
 const output=join(import.meta.dir,'../common/build/generated/pi/aibotassist/pi');mkdirSync(output,{recursive:true});
-const manifest={version:'pi-0.85.1-bridge-2',files:{}};
+const manifest={version:'pi-0.85.1-bridge-6',files:{}};
 for(const key of selected){
  if(!platforms[key])throw new Error('Unsupported target '+key);
  const name='aibotassist-pi-'+key+(key.startsWith('windows')?'.exe':'');

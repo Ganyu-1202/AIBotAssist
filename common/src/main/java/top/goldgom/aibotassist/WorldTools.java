@@ -60,6 +60,8 @@ public final class WorldTools {
                     JsonObject b=new JsonObject();b.addProperty("x",pos.getX()-origin.getX());b.addProperty("y",pos.getY()-origin.getY());b.addProperty("z",pos.getZ()-origin.getZ());
                     b.addProperty("block",BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());b.addProperty("replaceable",state.canBeReplaced());b.addProperty("breakable",p.isCreative()||state.getDestroySpeed(p.serverLevel(),pos)>=0);b.addProperty("accessible",p.serverLevel().mayInteract(p,pos));blocks.add(b);
                 }result.add("blocks",blocks);result.addProperty("truncated",truncated);result.addProperty("offset_x",dx);result.addProperty("offset_y",dy);result.addProperty("offset_z",dz);
+                JsonObject center=new JsonObject();center.addProperty("x",origin.getX());center.addProperty("y",origin.getY());center.addProperty("z",origin.getZ());result.add("origin",center);
+                result.addProperty("coordinate_frame","Block offsets are relative to this query origin. Convert to the fixed build origin before submitting a plan.");
             }
             case "inspect_entities" -> {
                 JsonArray entities=new JsonArray();for(var e:p.serverLevel().getEntities(p,p.getBoundingBox().inflate(12),e->e instanceof net.minecraft.world.entity.LivingEntity)) {
@@ -76,8 +78,8 @@ public final class WorldTools {
             case "get_operation_history" -> {JsonArray events=new JsonArray();history.getOrDefault(p.getUUID(),new ArrayDeque<>()).forEach(events::add);result.add("events",events);}
             case "verify_result" -> {
                 Blueprint b=blueprints.getOrDefault(p.getUUID(),new LinkedHashMap<>()).get(args.get("task_id").getAsString());if(b==null||!b.dimension.equals(p.serverLevel().dimension().location().toString()))throw new IllegalArgumentException("没有当前维度个人建筑记录");
-                int mismatched=0;for(var block:b.plan.blocks()){BlockPos pos=b.origin.offset(block.x(),block.y(),block.z());if(!p.serverLevel().hasChunkAt(pos))throw new IllegalArgumentException("区块未加载");if(!SpecialPlacement.matches(block,p.serverLevel().getBlockState(pos)))mismatched++;}
-                result.addProperty("expected",b.plan.blocks().size());result.addProperty("mismatched",mismatched);result.addProperty("matches",mismatched==0);
+                JsonArray differences=new JsonArray();int mismatched=0;for(var block:b.plan.blocks()){BlockPos pos=b.origin.offset(block.x(),block.y(),block.z());if(!p.serverLevel().hasChunkAt(pos))throw new IllegalArgumentException("区块未加载");if(!SpecialPlacement.matches(block,p.serverLevel().getBlockState(pos))){mismatched++;if(differences.size()<32){JsonObject diff=new JsonObject();diff.addProperty("x",pos.getX());diff.addProperty("y",pos.getY());diff.addProperty("z",pos.getZ());diff.addProperty("expected",block.block()+block.properties());diff.addProperty("actual",p.serverLevel().getBlockState(pos).toString());differences.add(diff);}}}
+                result.addProperty("expected",b.plan.blocks().size());result.addProperty("mismatched",mismatched);result.addProperty("matches",mismatched==0);result.add("differences",differences);result.addProperty("differences_truncated",mismatched>differences.size());
             }
             default -> throw new IllegalArgumentException("未知世界工具");
         }return result;

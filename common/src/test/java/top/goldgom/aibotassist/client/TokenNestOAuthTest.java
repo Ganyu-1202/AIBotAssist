@@ -20,7 +20,7 @@ class TokenNestOAuthTest {
         URI uri=TokenNestOAuth.authorization(TokenNestOAuth.DEFAULT_CLIENT_ID,54321,"test-state",verifier);
         var q=TokenNestOAuth.callbackQuery(uri.getRawQuery()+"&code=test", "test-state");
         assertEquals("http://127.0.0.1:54321/aibotassist/callback",q.get("redirect_uri"));
-        assertEquals("api offline_access",q.get("scope"));
+        assertEquals("api offline_access groups:read",q.get("scope"));
         assertEquals(TokenNestOAuth.DEFAULT_CLIENT_ID,q.get("client_id"));
         assertEquals("S256",q.get("code_challenge_method"));
         assertFalse(q.containsKey("client_secret"));assertFalse(q.containsKey("code_verifier"));
@@ -74,6 +74,7 @@ class TokenNestOAuthTest {
     }
     @Test void successfulCallbackExchangesPkceAndPersistsOnlyForInitiatingWorld() throws Exception {
         var settings=new ClientSettings();var store=new LocalCredentials(dir);
+        var authorized=new java.util.concurrent.atomic.AtomicInteger();
         List<String> forms=new CopyOnWriteArrayList<>();
         var connection=new AiConnection(store,(s,form)->{
             forms.add(form);JsonObject tokens=new JsonObject();tokens.addProperty("access_token","test-access");
@@ -81,13 +82,14 @@ class TokenNestOAuthTest {
         });
         try {
             connection.enter("world-a",settings);
-            URI auth=connection.login(settings,message->{});
+            URI auth=connection.login(settings,message->{},()->{assertTrue(connection.ready());authorized.incrementAndGet();});
             String state=extractState(auth);
             var q=TokenNestOAuth.callbackQuery(auth.getRawQuery()+"&code=test",state);
             var http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
             URI callback=URI.create(q.get("redirect_uri")+"?state="+state+"&code=test-code");
             var reply=http.send(HttpRequest.newBuilder(callback).timeout(Duration.ofSeconds(5)).build(),HttpResponse.BodyHandlers.ofString());
             assertTrue(reply.body().contains("Signed in"));assertEquals(1,forms.size());
+            assertEquals(1,authorized.get());
             var form=TokenNestOAuth.callbackQuery(forms.getFirst()+"&state="+state,state);
             assertEquals(q.get("code_challenge"),TokenNestOAuth.challenge(form.get("code_verifier")));
             assertEquals(q.get("redirect_uri"),form.get("redirect_uri"));

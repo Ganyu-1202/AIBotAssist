@@ -121,14 +121,15 @@ public final class ResourceTools {
     private static JsonObject recipes(ServerPlayer p, JsonObject args) {
         String id = canonicalId(text(args, "item")); registered(id);
         String type = args.has("type") ? text(args, "type") : "all";
-        if (!Set.of("all", "crafting", "smelting", "blasting", "smoking", "campfire_cooking", "stonecutting", "smithing").contains(type)) throw new IllegalArgumentException();
+        if (!type.equals("all")) { type=type.contains(":")?type:"minecraft:"+type; if(!BuiltInRegistries.RECIPE_TYPE.containsKey(ResourceLocation.parse(type)))throw new IllegalArgumentException(); }
         int limit = integer(args, "limit", 8, 1, MAX_RECIPES);
-        int offset = integer(args, "offset", 0, 0, RECIPE_SCAN - 1);
+        int offset = integer(args, "offset", 0, 0, Integer.MAX_VALUE);
         JsonObject o = ok(); JsonArray found = new JsonArray(); int scanned = 0, matched = 0; boolean truncated = false;
         for (var holder : p.server.getRecipeManager().getOrderedRecipes()) {
-            if (scanned++ >= RECIPE_SCAN) { truncated = true; break; }
+            scanned++;
+            try {
             var recipe = holder.value();
-            String recipeType = BuiltInRegistries.RECIPE_TYPE.getKey(recipe.getType()).getPath();
+            String recipeType = BuiltInRegistries.RECIPE_TYPE.getKey(recipe.getType()).toString();
             if (!type.equals("all") && !type.equals(recipeType)) continue;
             ItemStack output = recipe.getResultItem(p.registryAccess());
             if (output.isEmpty() || !BuiltInRegistries.ITEM.getKey(output.getItem()).toString().equals(id)) continue;
@@ -139,8 +140,8 @@ public final class ResourceTools {
             r.addProperty("executable", recipe instanceof CraftingRecipe && !recipe.isSpecial()
                 && (recipe instanceof ShapedRecipe || recipe instanceof ShapelessRecipe) && output.getComponentsPatch().isEmpty());
             if (recipe instanceof CraftingRecipe c) r.addProperty("needsTable", !c.canCraftInDimensions(2, 2));
-            JsonArray ingredients = new JsonArray(); boolean bounded = recipe.getIngredients().size() > 9;
-            for (int i = 0; i < Math.min(9, recipe.getIngredients().size()); i++) {
+            JsonArray ingredients = new JsonArray(); boolean bounded = recipe.getIngredients().size() > 32;
+            for (int i = 0; i < Math.min(32, recipe.getIngredients().size()); i++) {
                 ItemStack[] options = recipe.getIngredients().get(i).getItems();
                 JsonArray choices = new JsonArray();
                 for (int j = 0; j < Math.min(MAX_OPTIONS, options.length); j++) choices.add(BuiltInRegistries.ITEM.getKey(options[j].getItem()).toString());
@@ -149,9 +150,10 @@ public final class ResourceTools {
                 bounded |= options.length > MAX_OPTIONS;
             }
             r.add("ingredients", ingredients); r.addProperty("ingredientsTruncated", bounded); found.add(r);
+            } catch(RuntimeException unsupported) { /* Mod recipe may require dynamic inputs. */ }
         }
         o.add("recipes", found); o.addProperty("truncated", truncated); o.addProperty("nextOffset", offset + found.size());
-        o.addProperty("scanLimit", RECIPE_SCAN); o.addProperty("processingExecuted", false); return o;
+        o.addProperty("scanned", scanned); o.addProperty("note", "Generic item ingredients only; dynamic/fluid/energy details require query_jei. Unsupported mod recipes may be skipped."); o.addProperty("processingExecuted", false); return o;
     }
     private static List<ItemStack> snapshot(ServerPlayer p) {
         List<ItemStack> stock = new ArrayList<>();

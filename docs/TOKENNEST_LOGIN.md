@@ -10,7 +10,7 @@ AI Bot Assist 使用公共原生客户端的 Authorization Code + PKCE S256，�
 | 应用名称 | AI Bot Assist |
 | 项目默认 client_id | `tnc_eqezq1pCPAZ4oOkU90ZEchhiyvFf3Pks`（用户提供的后台客户端 ID） |
 | 注册的 Redirect URI | `http://127.0.0.1/aibotassist/callback` |
-| Allowed scopes | `api offline_access` |
+| Allowed scopes | `api offline_access groups:read` |
 | 客户端类型 | public / native |
 | Grant types | `authorization_code`、`refresh_token` |
 | Response type | `code` |
@@ -45,11 +45,12 @@ TokenNest 的无端口 loopback 注册规则允许这个端口变化，主机和
 
 ## 玩家使用与验收
 
-1. 进入游戏世界，执行 `/aibot settings`；模型 ID 按账户实际可用模型填写。
+1. 进入游戏世界，执行 `/aibot settings`。模型 ID 可留空，登录后自动从账户模型列表选择兼容 Chat / Responses 的首个模型；列表刷新时保留仍可用的模型，不再保留已不可用的旧选择。
 2. 如果后台生成了其他 client_id，先到“登录 / Pi运行时”页填写并保存。
 3. 点击“TokenNest 登录”，API 地址自动切换为 TokenNest `/v1`。在系统浏览器登录、同意授权。
-4. 回调页出现 `Signed in`，游戏显示“TokenNest 已授权”。退出并重新进入同一世界，凭据应继续可用。
-5. 在聊天中输入 `@AI 你好`，再测试 `@AI 看看周围有什么`，验证模型和工具请求。
+4. 回调页出现 `Signed in`。游戏获取模型后显示“可用：模型ID”，可用“选择模型”按钮切换；模型查询失败会保留登录凭据并显示模型获取错误，不会再提示重新登录。
+5. 退出并重新进入同一世界，凭据继续可用。已有登录但模型为空的旧配置会自动补选模型；首次聊天也会补选并继续处理原消息。
+6. 在聊天中输入 `@AI 你好`，再测试 `@AI 看看周围有什么`，验证模型和工具请求。
 
 登录等待 3 分钟，可在高级页取消后重新发起。错误 state、重复参数和其他无效回调不会终止当前合法登录。
 玩家切换世界、清除凭据、更换 API/client_id 时，原登录等待会取消。
@@ -63,3 +64,13 @@ TokenNest 的无端口 loopback 注册规则允许这个端口变化，主机和
 公开 OAuth metadata 及本机 TokenNest 源码用于核对服务端协议；自动测试覆盖 PKCE、回调校验、
 本地 HTTP 回调和取消、跨世界隔离、OAuth 凭据的目标地址限制。
 服务器创建客户端后仍需按上面的步骤完成一次真实浏览器授权、换取令牌及模型请求验收。
+
+## 渠道与模型接口
+
+在「设置 → 渠道/类型」中选择或填写 TokenNest 渠道，默认 `default`。获取渠道调用 OAuth 的 `/api/oauth2/groups`；修改渠道后，模型查询和模型请求均携带 `X-TokenNest-Group`，重新检查可用模型。没有权限的渠道由服务端拒绝，失败保留本地登录凭据。
+
+后台此客户端的 Allowed scopes 需包含 `groups:read`；已有授权需重新登录同意新范围，才能获取渠道列表。手动填写渠道无需渠道查询权限。普通 API Key 仍按密钥自身绑定的渠道计费和路由，TokenNest 会忽略它的渠道请求头；使用相应渠道的密钥或切换到 OAuth 登录。
+
+模型类型默认 `auto`，根据目录中的 `supported_endpoint_types` 选择 Chat Completions 或 Responses，选择器显示接口类型。Responses 支持工具调用、工具反馈及视野/地图图片。可手动指定 `chat` 或 `responses` 以连接自定义模型；未提供目录的通用服务默认按 Chat 处理。仅图片生成、嵌入等模型不出现在可用列表，未实现 Anthropic/Gemini 原生协议。
+
+多人共享模式由管理员在「服务器 API → 渠道/类型」固定渠道和接口，默认 `default` / `chat`。玩家个人渠道不能覆盖服务器配置；共享 API Key 仍使用密钥本身绑定的 TokenNest 渠道。

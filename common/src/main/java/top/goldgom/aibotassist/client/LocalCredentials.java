@@ -22,12 +22,19 @@ public final class LocalCredentials {
         byte[] key=Files.readAllBytes(file);if(key.length!=32)throw new IllegalStateException("Invalid local key");return key;
     }
     public synchronized void save(String scope,Secret secret)throws Exception{
+        savePayload(scope,new Gson().toJson(secret),32768);
+    }
+    synchronized void savePayload(String scope,String payload,int max)throws Exception{
+        byte[] plain=payload.getBytes(StandardCharsets.UTF_8);if(plain.length>max-28)throw new IllegalArgumentException("Local record too large");
         byte[] iv=new byte[12];new SecureRandom().nextBytes(iv);Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,new SecretKeySpec(key(),"AES"),new GCMParameterSpec(128,iv));cipher.updateAAD(scope.getBytes(StandardCharsets.US_ASCII));
-        byte[] encrypted=cipher.doFinal(new Gson().toJson(secret).getBytes(StandardCharsets.UTF_8));byte[] data=new byte[12+encrypted.length];System.arraycopy(iv,0,data,0,12);System.arraycopy(encrypted,0,data,12,encrypted.length);
+        byte[] encrypted=cipher.doFinal(plain);byte[] data=new byte[12+encrypted.length];System.arraycopy(iv,0,data,0,12);System.arraycopy(encrypted,0,data,12,encrypted.length);
         Path target=file(scope),temp=Files.createTempFile(root,"save-",".tmp");try{restrict(temp);Files.write(temp,data);try{Files.move(temp,target,StandardCopyOption.REPLACE_EXISTING,StandardCopyOption.ATOMIC_MOVE);}catch(AtomicMoveNotSupportedException e){Files.move(temp,target,StandardCopyOption.REPLACE_EXISTING);}restrict(target);}finally{Files.deleteIfExists(temp);}
     }
     public synchronized Secret load(String scope)throws Exception{
-        Path file=file(scope);if(!Files.exists(file))return null;if(Files.size(file)>32768)throw new IllegalStateException("Credential record too large");byte[] data=Files.readAllBytes(file);if(data.length<28)throw new IllegalStateException("Credential record invalid");Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE,new SecretKeySpec(key(),"AES"),new GCMParameterSpec(128,Arrays.copyOf(data,12)));cipher.updateAAD(scope.getBytes(StandardCharsets.US_ASCII));return new Gson().fromJson(new String(cipher.doFinal(Arrays.copyOfRange(data,12,data.length)),StandardCharsets.UTF_8),Secret.class);
+        String json=loadPayload(scope,32768);return json==null?null:new Gson().fromJson(json,Secret.class);
+    }
+    synchronized String loadPayload(String scope,int max)throws Exception{
+        Path file=file(scope);if(!Files.exists(file))return null;if(Files.size(file)>max)throw new IllegalStateException("Credential record too large");byte[] data=Files.readAllBytes(file);if(data.length<28)throw new IllegalStateException("Credential record invalid");Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE,new SecretKeySpec(key(),"AES"),new GCMParameterSpec(128,Arrays.copyOf(data,12)));cipher.updateAAD(scope.getBytes(StandardCharsets.US_ASCII));return new String(cipher.doFinal(Arrays.copyOfRange(data,12,data.length)),StandardCharsets.UTF_8);
     }
     public synchronized void delete(String scope)throws Exception{Files.deleteIfExists(file(scope));}
 }

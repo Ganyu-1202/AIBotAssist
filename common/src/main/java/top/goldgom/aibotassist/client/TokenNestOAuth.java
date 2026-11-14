@@ -12,7 +12,7 @@ public final class TokenNestOAuth {
     public static final String DEFAULT_CLIENT_ID = "tnc_eqezq1pCPAZ4oOkU90ZEchhiyvFf3Pks";
     public static final String CALLBACK_PATH = "/aibotassist/callback";
     public static final String REGISTERED_REDIRECT_URI = "http://127.0.0.1" + CALLBACK_PATH;
-    public static final String SCOPES = "api offline_access";
+    public static final String SCOPES = "api offline_access groups:read";
     private TokenNestOAuth() {}
 
     public static void requireApi(String base) {

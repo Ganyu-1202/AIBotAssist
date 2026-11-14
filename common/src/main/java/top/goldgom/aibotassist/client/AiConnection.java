@@ -19,12 +19,20 @@ public final class AiConnection {
     private volatile HttpServer callback;
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(r -> { Thread t = new Thread(r, "aibot-oauth-timeout"); t.setDaemon(true); return t; });
     private String scope, boundEndpoint="",boundClientId="";
+    private long sessionVersion;
+    private volatile Map<String,String> modelTypes=Map.of();
+    private volatile String catalogKey="";
+    private static String catalogKey(ClientSettings s){return s.baseUrl+"|"+s.group+"|"+s.modelProtocol;}
+    public String modelType(ClientSettings s,String id){return catalogKey(s).equals(catalogKey)?modelTypes.getOrDefault(id,"chat"):"chat";}
     private final LocalCredentials store;
     @FunctionalInterface interface TokenRequest { JsonObject request(ClientSettings settings,String form) throws Exception; }
+    @FunctionalInterface interface ApiRequest { JsonObject request(ClientSettings settings,String token,String path,JsonObject body) throws Exception; }
     private final TokenRequest tokenRequest;
+    private final ApiRequest apiRequest;
     public AiConnection() { this(new LocalCredentials(dev.architectury.platform.Platform.getConfigFolder().resolve("aibotassist/private"))); }
     AiConnection(LocalCredentials store) { this(store,AiConnection::requestTokens); }
-    AiConnection(LocalCredentials store,TokenRequest tokenRequest) { this.store=store;this.tokenRequest=tokenRequest; }
+    AiConnection(LocalCredentials store,TokenRequest tokenRequest) { this(store,tokenRequest,AiConnection::requestApi); }
+    AiConnection(LocalCredentials store,TokenRequest tokenRequest,ApiRequest apiRequest) { this.store=store;this.tokenRequest=tokenRequest;this.apiRequest=apiRequest; }
     public synchronized void enter(String identity,ClientSettings settings) {
         logout();scope=LocalCredentials.scope(identity);boundEndpoint=settings.baseUrl;boundClientId=settings.clientId;
         try{var saved=store.load(scope);if(saved!=null&&saved.endpoint().equals(settings.baseUrl)&&(saved.clientId().equals(settings.clientId)||(saved.access().isBlank()&&saved.refresh().isBlank()))){
@@ -40,10 +48,11 @@ public final class AiConnection {
         catch(Exception e){throw new IllegalStateException("本地凭据保存失败",e);}
     }
     public synchronized void setKey(String key) {clearMemory();apiKey=key.trim();persist();}
-    private void clearMemory(){apiKey="";access="";refresh="";expires=0;if(callback!=null){callback.stop(0);callback=null;}}
+    private void clearMemory(){sessionVersion++;modelTypes=Map.of();catalogKey="";apiKey="";access="";refresh="";expires=0;if(callback!=null){callback.stop(0);callback=null;}}
     public synchronized void logout(){clearMemory();scope=null;}
     public synchronized void forget(){try{if(scope!=null)store.delete(scope);}catch(Exception e){throw new IllegalStateException("无法删除本地凭据",e);}clearMemory();}
     public boolean ready(){return !apiKey.isBlank()||!access.isBlank()||!refresh.isBlank();}
+    public synchronized long sessionVersion(){return sessionVersion;}
     public synchronized boolean loginPending(){return callback!=null;}
     public synchronized String authStatus(){return callback!=null?"auth_pending":!access.isBlank()||!refresh.isBlank()?"auth_logged_in":!apiKey.isBlank()?"auth_api_key":"auth_signed_out";}
     public synchronized void cancelLogin(){if(callback!=null){callback.stop(0);callback=null;}}
@@ -81,19 +90,50 @@ public final class AiConnection {
         return access;
     }
     public JsonObject agentTurn(ClientSettings settings, JsonArray messages, JsonArray tools) throws Exception {
-        URI base=endpoint(settings.baseUrl);
         String token=bearer(settings);
         if(token.isBlank())throw new IllegalStateException("请先登录或配置密钥");
-        JsonObject body=new JsonObject();body.addProperty("model",settings.model);body.add("messages",messages);
-        body.addProperty("max_tokens",12000);
-        if(!tools.isEmpty()) {body.add("tools",tools);body.addProperty("tool_choice","auto");body.addProperty("parallel_tool_calls",false);}
-        HttpRequest request=HttpRequest.newBuilder(URI.create(base+"/chat/completions")).timeout(Duration.ofSeconds(90))
-            .header("Authorization","Bearer "+token).header("Content-Type","application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(body.toString())).build();
-        JsonObject reply=read(client(settings.proxy).send(request,HttpResponse.BodyHandlers.ofInputStream()),500_000);
-        return reply.getAsJsonArray("choices").get(0).getAsJsonObject().getAsJsonObject("message");
+        String protocol=settings.modelProtocol;
+        if(protocol.equals("auto")) {
+            if(!catalogKey(settings).equals(catalogKey)) {
+                long version=sessionVersion();
+                try{listModels(settings);}catch(InterruptedException e){throw e;}catch(Exception unavailable){
+                    // Custom providers can serve a manual model without a discovery endpoint.
+                    synchronized(this){if(version!=sessionVersion)throw new InterruptedException("登录状态已改变");modelTypes=Map.of();catalogKey=catalogKey(settings);}
+                }
+            }
+            protocol=modelType(settings,settings.model);
+        }
+        JsonObject body=top.goldgom.aibotassist.ModelProtocol.body(protocol,settings.model,messages,tools);
+        return top.goldgom.aibotassist.ModelProtocol.message(protocol,apiRequest.request(settings,token,top.goldgom.aibotassist.ModelProtocol.path(protocol),body));
     }
+    public List<String> listModels(ClientSettings settings) throws Exception {
+        String token;long version;
+        synchronized(this) {token=bearer(settings);version=sessionVersion;}
+        if(token.isBlank())throw new IllegalStateException("请先登录或配置密钥");
+        var catalog=AgentModels.catalog(apiRequest.request(settings,token,"/models",null),settings.modelProtocol);
+        synchronized(this) {
+            if(sessionVersion!=version)throw new InterruptedException("模型查询期间登录状态已改变");
+            modelTypes=catalog;catalogKey=catalogKey(settings);
+        }
+        return List.copyOf(catalog.keySet());
+    }
+    public List<String> listGroups(ClientSettings settings) throws Exception {
+        TokenNestOAuth.requireApi(settings.baseUrl);
+        String token;long version;
+        synchronized(this){if(access.isBlank()&&refresh.isBlank())throw new IllegalStateException("API密钥绑定自身渠道；切换渠道请使用TokenNest登录");token=bearer(settings);version=sessionVersion;}
+        JsonObject reply=apiRequest.request(settings,token,"/api/oauth2/groups",null);
+        JsonObject data=reply.getAsJsonObject("data");if(data==null)throw new IllegalArgumentException("渠道列表格式无效");
+        List<String> groups=new ArrayList<>();for(String group:data.keySet()) {
+            try{top.goldgom.aibotassist.ModelProtocol.validate("auto",group,true);groups.add(group);}catch(IllegalArgumentException ignored){}
+        }
+        synchronized(this){if(sessionVersion!=version)throw new InterruptedException("登录状态已改变");}
+        return List.copyOf(groups);
+    }
+
     public synchronized URI login(ClientSettings settings, Consumer<String> status) throws Exception {
+        return login(settings,status,()->{});
+    }
+    public synchronized URI login(ClientSettings settings, Consumer<String> status,Runnable authorized) throws Exception {
         if (scope == null) throw new IllegalStateException("请进入游戏世界后再登录 TokenNest");
         TokenNestOAuth.requireApi(settings.baseUrl);
         configure(settings);
@@ -122,6 +162,7 @@ public final class AiConnection {
                     finishLogin(loginScope,server,settings, "grant_type=authorization_code&client_id=" + enc(settings.clientId) + "&code=" + enc(query.get("code")) + "&redirect_uri=" + enc(redirect) + "&code_verifier=" + enc(verifier));
                     result = "Signed in. You can close this tab and return to Minecraft.";
                     status.accept("TokenNest 登录成功，已保存到本机当前世界的凭据库。");
+                    authorized.run();
                 }
             } catch (Exception e) { status.accept("TokenNest 授权失败或已过期，请重试；未输出令牌或服务端响应。"); }
             try { callbackResponse(exchange, 200, result); }
@@ -160,6 +201,19 @@ public final class AiConnection {
         refresh = nextRefresh;
         expires = System.currentTimeMillis() + Math.min(lifetime, 86400) * 1000;
         persist();
+        if(!form.startsWith("grant_type=refresh_token"))sessionVersion++;
+    }
+    static HttpRequest apiHttpRequest(ClientSettings settings,String token,String path,JsonObject body) {
+        URI base=endpoint(settings.baseUrl);
+        URI target=path.startsWith("/api/oauth2/")?URI.create(NEST+path):URI.create(base+path);
+        HttpRequest.Builder request=HttpRequest.newBuilder(target).timeout(Duration.ofSeconds(body==null?25:90))
+            .header("Authorization","Bearer "+token).header("Content-Type","application/json");
+        if(base.toString().equals(TokenNestOAuth.API_BASE))request.header("X-TokenNest-Group",settings.group);
+        if(body==null)request.GET();else request.POST(HttpRequest.BodyPublishers.ofString(body.toString()));
+        return request.build();
+    }
+    private static JsonObject requestApi(ClientSettings settings,String token,String path,JsonObject body) throws Exception {
+        return read(client(settings.proxy).send(apiHttpRequest(settings,token,path,body),HttpResponse.BodyHandlers.ofInputStream()),body==null?1_000_000:top.goldgom.aibotassist.PacketChunks.MAX_BYTES);
     }
     private static JsonObject requestTokens(ClientSettings settings,String form) throws Exception {
         HttpRequest request=HttpRequest.newBuilder(URI.create(NEST+"/api/oauth2/token")).timeout(Duration.ofSeconds(25))

@@ -63,7 +63,8 @@ class SpecialPlacementTest {
         for (int x = -16; x <= 16 && input.size() < 129; x++)
             for (int z = -16; z <= 16 && input.size() < 129; z++) input.add(new Plan.Placement(x, 0, z, "minecraft:oak_door"));
         assertEquals(256, SpecialPlacement.expand(input.subList(0, 128)).size());
-        assertThrows(IllegalArgumentException.class, () -> SpecialPlacement.expand(input));
+        assertEquals(258,SpecialPlacement.expand(input).size());
+        assertThrows(IllegalArgumentException.class,()->Plan.checkLimit(256,SpecialPlacement.expand(input).size()));
     }
 
     @Test void actualItemsAndPartialSuccessCannotMakeHalfBlocksFree() {

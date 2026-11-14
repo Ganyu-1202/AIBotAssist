@@ -1,5 +1,6 @@
 architectury { common('fabric', 'neoforge') }
 dependencies {
+    modCompileOnly('mezz.jei:jei-1.21.1-common-api:19.21.0.247') { transitive = false }
     modImplementation 'net.fabricmc:fabric-loader:0.16.10'
     modApi 'dev.architectury:architectury:13.0.8'
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'

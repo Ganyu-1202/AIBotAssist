@@ -14,14 +14,17 @@ import net.minecraft.world.level.block.state.BlockState;
 import java.util.*;
 
 public final class BuildService {
-    private record Request(String id, BlockPos origin, String dimension, long expires) {}
+    private record Request(String id, BlockPos origin, String dimension, long expires, int blockLimit, String facing, String session) {}
     private record Pending(Request request, Plan plan, long expires, Map<BlockPos, BlockState> removalStates) {}
     private static final class Job {
         final Pending pending;
         int index;
         int placedCount,removedCount;
         boolean blocksDone;
-        Job(Pending pending) { this.pending = pending; }
+        final List<Pending> batches;
+        int batchIndex,verifyIndex;
+        Job(Pending pending) {this.pending=pending;this.batches=slices(pending);}
+
     }
     private record ProcessingWait(UUID player,String call,String task,long deadline) {}
     private static final List<ProcessingWait> processingWaits=new ArrayList<>();
@@ -30,28 +33,32 @@ public final class BuildService {
     private static final Map<UUID,String> agentCalls = new HashMap<>();
     private static final Map<UUID,String> observations = new HashMap<>();
     private static final Map<UUID, Request> requests = new HashMap<>();
+    private static final Map<UUID,BuildAnchor> anchors=new HashMap<>();
+    private static final PacketChunks uploads=new PacketChunks();
     private static final Map<UUID, Job> jobs = new HashMap<>();
     private static final Map<UUID, Long> cooldowns = new HashMap<>();
     private static final class Rejected extends RuntimeException {
         Rejected(String reason) { super(reason); }
     }
     private static long now() { return System.currentTimeMillis(); }
-    public static void clear() { requests.clear(); jobs.clear(); cooldowns.clear(); agentCalls.clear(); observations.clear(); WorldTools.clear(); ProcessingService.clear(); receipts.clear();inflight.clear();processingWaits.clear(); }
+    public static void clear() { FakePlayerService.clear(); anchors.clear();uploads.clear();requests.clear(); jobs.clear(); cooldowns.clear(); agentCalls.clear(); observations.clear(); WorldTools.clear(); WorldSnapshots.clear(); ProcessingService.clear(); receipts.clear();inflight.clear();processingWaits.clear(); }
     public static void tell(ServerPlayer p, String message) { p.sendSystemMessage(Component.literal("[AI] " + message)); }
     private static void send(ServerPlayer p, JsonObject o) {
-        if(o.toString().length()>31000) {
-            JsonObject bounded=new JsonObject();bounded.addProperty("action","agent_result");
-            if(o.has("call"))bounded.add("call",o.get("call"));bounded.addProperty("status","partial_possible");
-            bounded.addProperty("reason","工具响应超出网络上限，操作可能已完成；缩小查询范围或查询任务状态，不要盲目重试");o=bounded;
-        }
-        NetworkManager.sendToPlayer(p, new Wire.Down(o.toString()));
+        String id=o.has("call")?o.get("call").getAsString():UUID.randomUUID().toString();
+        for(String part:PacketChunks.encode(o.toString(),id))NetworkManager.sendToPlayer(p,new Wire.Down(part));
     }
+
     public static void receive(ServerPlayer p, String json) {
         String stage = "读取请求";
         String incomingCall=null;
         try {
             JsonObject o = JsonParser.parseString(json).getAsJsonObject();
             String action = o.get("action").getAsString();
+            if(action.equals("fragment")) {
+                String id=o.get("id").getAsString();if(id.matches("[a-zA-Z0-9-]{1,64}"))incomingCall=id;
+                String complete=uploads.accept(p.getUUID(),o,now());if(complete!=null)receive(p,complete);return;
+            }
+            if(ServerApiService.receive(p,o))return;
             if(o.has("call")) {
                 incomingCall=o.get("call").getAsString();
                 if(!incomingCall.matches("[a-zA-Z0-9-]{1,64}"))throw new IllegalArgumentException("invalid call id");
@@ -66,6 +73,10 @@ public final class BuildService {
                 if(!AgentToolCatalog.NAMES.contains(tool))throw new Rejected("工具未注册");
                 stage="校验工具参数："+tool;
                 try{AgentToolCatalog.validateArgs(tool,args);}catch(IllegalArgumentException invalid){agentReply(p,call,"rejected",invalid.getMessage());return;}
+                if(tool.equals("run_advanced_command")) {
+                    Request observed=requests.get(p.getUUID());
+                    if(observed==null||!observed.id.equals(args.get("token").getAsString())||observed.expires<now()||!observed.dimension.equals(p.level().dimension().location().toString())||jobs.containsKey(p.getUUID())){agentReply(p,call,"rejected","需重新观察或等待建造完成");return;}
+                }
                 if(tool.equals("run_commands")) {
                     Request observed=requests.get(p.getUUID());
                     if(observed==null||!observed.id.equals(args.get("token").getAsString())){agentReply(p,call,"rejected","观察token无效");return;}
@@ -78,12 +89,12 @@ public final class BuildService {
                     Request observed=requests.get(p.getUUID());
                     if(observed==null||!observed.id.equals(args.get("token").getAsString())){agentReply(p,call,"rejected","观察token无效");return;}
                     Plan plan;
-                    if(tool.equals("build_structure"))plan=Structures.create(args.get("kind").getAsString(),args.get("width").getAsInt(),args.get("depth").getAsInt(),args.get("height").getAsInt(),AgentToolCatalog.fallbackMaterial(args),structurePalette(args),args.has("facing")?args.get("facing").getAsString():p.getDirection().getName(),0,0,0);
+                    if(tool.equals("build_structure"))plan=Structures.create(args.get("kind").getAsString(),args.get("width").getAsInt(),args.get("depth").getAsInt(),args.get("height").getAsInt(),AgentToolCatalog.fallbackMaterial(args),structurePalette(args),args.has("facing")?args.get("facing").getAsString():observed.facing,0,0,0);
                     else if(tool.equals("repair_structure")) {
                         try{plan=WorldTools.repair(p,args.get("task_id").getAsString(),observed.origin);}
                         catch(IllegalArgumentException failure){agentReply(p,call,"rejected",failure.getMessage());return;}
                     }
-                    else plan=Plan.parse(args.get("plan").toString());
+                    else plan=Plan.parse(args.get("plan").toString(),observed.blockLimit);
                     o.addProperty("id",observed.id);o.addProperty("plan",AIBotAssist.JSON.toJson(plan));
                     preview=tool.equals("preview_task");action="agent_execute";
                 } else {
@@ -104,7 +115,9 @@ public final class BuildService {
                                 }
                                 yield processed;
                             }
-                            default -> WorldTools.handle(p,tool,args);
+                            case "fakeplayer_control","capture_fakeplayer" -> FakePlayerService.handle(p,tool,args);
+                            case "machine_blueprint" -> MachineBlueprints.describe(p,args);
+                            default -> AdvancedTools.NAMES.contains(tool)?AdvancedTools.handle(p,tool,args):WorldTools.handle(p,tool,args);
                         };
                     }catch(Exception failure){result=new JsonObject();result.addProperty("status","rejected");result.addProperty("reason","参数、材料、设备或权限不满足，请检查查询结果");}
                     if(tool.equals("get_task_status")&&args.has("wait_ticks")&&result.has("status")&&Set.of("running","waiting_owner").contains(result.get("status").getAsString())) {
@@ -131,7 +144,14 @@ public final class BuildService {
                 if (jobs.containsKey(p.getUUID())) { tell(p, "已有任务执行中，请先取消。"); return; }
                 if (!observations.containsKey(p.getUUID()) && now() - cooldowns.getOrDefault(p.getUUID(), 0L) < 3000) return;
                 cooldowns.put(p.getUUID(), now());
-                Request r = new Request(UUID.randomUUID().toString(), p.blockPosition(), p.serverLevel().dimension().location().toString(), now() + 120_000);
+                String session=o.has("build_session")?o.get("build_session").getAsString():UUID.randomUUID().toString();
+                int limit=o.has("block_limit")?o.get("block_limit").getAsBigDecimal().intValueExact():Plan.MAX_BLOCKS;
+                Plan.checkLimit(limit,0);String dimension=p.serverLevel().dimension().location().toString();
+                BuildAnchor anchor=anchors.get(p.getUUID());
+                if(anchor==null||!anchor.session().equals(session)) {
+                    anchor=new BuildAnchor(session,p.blockPosition(),dimension,p.getDirection().getName(),limit,now()+600_000);anchors.put(p.getUUID(),anchor);
+                } else anchor=anchor.reuse(session,dimension,limit,now());
+                Request r = new Request(UUID.randomUUID().toString(),anchor.origin(),dimension,now()+120_000,limit,anchor.facing(),session);
                 requests.put(p.getUUID(), r);
                 JsonObject reply = new JsonObject();
                 reply.addProperty("action", "context"); reply.addProperty("id", r.id);
@@ -150,7 +170,11 @@ public final class BuildService {
                 String observation=observations.remove(p.getUUID());
                 if(observation!=null) {
                     reply.addProperty("action","agent_result");reply.addProperty("call",observation);reply.addProperty("status","observed");
-                    reply.addProperty("token",r.id);reply.addProperty("yaw",p.getYRot());reply.addProperty("facing",p.getDirection().getName());
+                    reply.addProperty("token",r.id);reply.addProperty("yaw",p.getYRot());reply.addProperty("facing",r.facing);
+                    JsonObject origin=new JsonObject();origin.addProperty("x",r.origin.getX());origin.addProperty("y",r.origin.getY());origin.addProperty("z",r.origin.getZ());reply.add("origin",origin);
+                    JsonObject player=new JsonObject();player.addProperty("x",p.blockPosition().getX());player.addProperty("y",p.blockPosition().getY());player.addProperty("z",p.blockPosition().getZ());reply.add("player_position",player);
+                    reply.addProperty("build_protocol",2);reply.addProperty("build_session",r.session);reply.addProperty("block_limit",r.blockLimit);reply.addProperty("coordinate_radius",Plan.RADIUS);
+                    reply.addProperty("coordinate_frame","All x/y/z are world-axis offsets from origin, fixed for this player request. Player movement and turning do not move or rotate the build. 0 block_limit means unlimited count.");
                     JsonArray terrain=new JsonArray();
                     // 9x5x9 non-air sample. No block entity contents, NBT or private inventories.
                     for(int x=-4;x<=4;x++)for(int y=-2;y<=2;y++)for(int z=-4;z<=4;z++) {
@@ -169,7 +193,7 @@ public final class BuildService {
                 Request r = preview?requests.get(p.getUUID()):requests.remove(p.getUUID());
                 if (r == null || r.expires < now() || !r.id.equals(o.get("id").getAsString())) { finishAgent(p,"rejected","观察token无效或过期，请重新观察");return; }
                 stage = "解析建造方案";
-                Plan plan = Plan.parse(o.get("plan").getAsString());
+                Plan plan = Plan.parse(o.get("plan").getAsString(),r.blockLimit);
                 plan = new Plan(plan.reply(),SpecialPlacement.expand(plan.blocks()),plan.commands(),plan.removals());
                 if (!plan.hasActions()) {finishAgent(p,"completed","空任务，无世界修改");return;}
                 if (p.isSpectator()) { tell(p, "旁观模式只能聊天。");finishAgent(p,"rejected","旁观模式只能聊天"); return; }
@@ -181,8 +205,7 @@ public final class BuildService {
                     var existing = p.serverLevel().getBlockState(pos);
                     if (!existing.isAir() && !existing.canBeReplaced()) removalStates.putIfAbsent(pos, existing);
                 }
-                if (removalStates.size() + plan.blocks().size() > Plan.MAX_BLOCKS)
-                    throw new Rejected("自动清障与放置合计超过256步，请缩小任务范围");
+                Plan.checkLimit(r.blockLimit,(long)removalStates.size()+plan.blocks().size());
                 Pending task = new Pending(r, plan, now() + 60_000, Map.copyOf(removalStates));
                 stage = "校验游戏状态、区域、工具和材料";
                 validate(p, task);
@@ -206,6 +229,25 @@ public final class BuildService {
             if(incomingCall!=null&&!receipts.getOrDefault(p.getUUID(),new LinkedHashMap<>()).containsKey(incomingCall))agentReply(p,incomingCall,"rejected","参数或状态错误，诊断编号"+code);
             tell(p, "请求在“" + stage + "”阶段失败，诊断编号 " + code + "；请查看服务端日志。未执行操作。");
         }
+    }
+    private static List<Pending> slices(Pending full) {
+        Map<BlockPos,BlockState> remaining=new LinkedHashMap<>(full.removalStates);
+        List<Pending> placements=new ArrayList<>();
+        for(var blocks:BuildSlices.partition(full.plan.blocks())) {
+            Map<BlockPos,BlockState> removals=new LinkedHashMap<>();
+            for(var block:blocks) {
+                BlockPos pos=full.request.origin.offset(block.x(),block.y(),block.z());BlockState state=remaining.remove(pos);
+                if(state!=null)removals.put(pos,state);
+            }
+            placements.add(new Pending(full.request,new Plan("",blocks),full.expires,Map.copyOf(removals)));
+        }
+        List<Pending> result=new ArrayList<>();Map<BlockPos,BlockState> removals=new LinkedHashMap<>();
+        for(var entry:remaining.entrySet()) {
+            removals.put(entry.getKey(),entry.getValue());
+            if(removals.size()==BuildSlices.REMOVALS){result.add(new Pending(full.request,new Plan("",List.of()),full.expires,Map.copyOf(removals)));removals.clear();}
+        }
+        if(!removals.isEmpty())result.add(new Pending(full.request,new Plan("",List.of()),full.expires,Map.copyOf(removals)));
+        result.addAll(placements);return List.copyOf(result);
     }
     private static Map<String,String> structurePalette(JsonObject args) {
         Map<String,String> palette=new HashMap<>();
@@ -336,8 +378,7 @@ public final class BuildService {
         }
         p.getInventory().setChanged();
     }
-    private static void executeBatch(ServerPlayer p, Job job) throws Exception {
-        Pending task=job.pending;
+    private static void executeBatch(ServerPlayer p, Job job, Pending task) throws Exception {
         boolean paid = !p.isCreative();
         // Plan completely on a copied inventory before committing any crafting effects.
         if (paid) {
@@ -431,10 +472,11 @@ public final class BuildService {
         return parsed;
     }
     public static void cancel(ServerPlayer p) {
-        requests.remove(p.getUUID()); jobs.remove(p.getUUID()); observations.remove(p.getUUID()); finishAgent(p,"partial_possible","玩家取消，已执行部分可能保留"); tell(p, "已取消，已建造部分保留。");
+        FakePlayerService.remove(p.getUUID());
+        uploads.cancel(p.getUUID());anchors.remove(p.getUUID());requests.remove(p.getUUID()); jobs.remove(p.getUUID()); observations.remove(p.getUUID()); finishAgent(p,"partial_possible","玩家取消，已执行部分可能保留"); tell(p, "已取消，已建造部分保留。");
     }
     public static void tick(MinecraftServer server) {
-        ProcessingService.tick(server);
+        FakePlayerService.tick(server);ProcessingService.tick(server);
         var waits=processingWaits.iterator();
         while(waits.hasNext()) {
             var wait=waits.next();var player=server.getPlayerList().getPlayer(wait.player());
@@ -446,7 +488,7 @@ public final class BuildService {
                 result.addProperty("action","agent_result");result.addProperty("call",wait.call());recordReceipt(player,wait.call(),result);send(player,result);waits.remove();
             }
         }
-        int budget = 32;
+        int budget = 128;
         var iterator = jobs.entrySet().iterator();
         while (iterator.hasNext() && budget > 0) {
             var entry = iterator.next();
@@ -456,13 +498,21 @@ public final class BuildService {
             try {
                 location(p, j.pending);
                 if (!j.blocksDone) {
-                    validate(p, j.pending);
-                    executeBatch(p, j);
-                    j.blocksDone=true;
-                    if (!j.pending.plan.blocks().isEmpty() || !j.pending.removalStates.isEmpty()) {
-                        budget -= Plan.MAX_BLOCKS;
-                        tell(p,"清障/建造阶段完成：放置 " + j.pending.plan.blocks().size() + "，拆除 " + j.pending.removalStates.size());
+                    if(j.batchIndex<j.batches.size()) {
+                        Pending batch=j.batches.get(j.batchIndex);validate(p,batch);executeBatch(p,j,batch);j.batchIndex++;
+                        budget-=Math.max(1,batch.plan.blocks().size()+batch.removalStates.size());
+                        if(j.batchIndex<j.batches.size())continue;
                     }
+                    // Verify the complete submitted plan after all slices, including earlier supports.
+                    int end=Math.min(j.verifyIndex+128,j.pending.plan.blocks().size());
+                    for(;j.verifyIndex<end;j.verifyIndex++) {
+                        var block=j.pending.plan.blocks().get(j.verifyIndex);BlockPos pos=j.pending.request.origin.offset(block.x(),block.y(),block.z());
+                        if(!p.serverLevel().hasChunkAt(pos)||!SpecialPlacement.matches(block,p.serverLevel().getBlockState(pos)))throw new Rejected("整体验证发现方块不一致："+pos.toShortString());
+                    }
+                    budget-=128;
+                    if(j.verifyIndex<j.pending.plan.blocks().size())continue;
+                    j.blocksDone=true;
+                    if(!j.pending.plan.blocks().isEmpty()||!j.pending.removalStates.isEmpty())tell(p,"清障/建造及整批验证完成：放置 "+j.placedCount+"，拆除 "+j.removedCount+"，分 "+j.batches.size()+" 批执行。");
                 }
                 if (j.index < j.pending.plan.commands().size()) {
                     var parsed = parseCommand(p, j.pending.plan.commands().get(j.index));
@@ -475,7 +525,8 @@ public final class BuildService {
                 if (j.index == j.pending.plan.commands().size()) { tell(p, "任务完成。");finishAgent(p,"completed","服务器确认任务阶段完成"); iterator.remove(); }
             } catch (Exception e) { finishAgent(p,"partial_possible",e instanceof Rejected?e.getMessage():"执行异常，可能部分生效；先观察再决定后续操作"); if (e instanceof Rejected) tell(p,e.getMessage()); tell(p, "任务已停止：已放置 " + j.placedCount + " 格、拆除 " + j.removedCount + " 格、完成命令 " + j.index + " 条。已执行部分保留，不自动重试或撤销。"); iterator.remove(); }
         }
-        long time = now();
+        long time = now();uploads.expire(time);
+        anchors.keySet().removeIf(id->server.getPlayerList().getPlayer(id)==null);
         requests.values().removeIf(r -> r.expires < time);
         cooldowns.entrySet().removeIf(e -> time - e.getValue() > 120_000);
     }

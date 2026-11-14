@@ -1,6 +1,6 @@
 {
   "name": "AI Bot Assist",
   "redirect_uris": ["http://127.0.0.1/aibotassist/callback"],
-  "allowed_scopes": ["api", "offline_access"],
+  "allowed_scopes": ["api", "offline_access", "groups:read"],
   "enabled": true
 }

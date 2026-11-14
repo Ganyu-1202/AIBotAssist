@@ -181,3 +181,112 @@
 - 构建使用 `D:\Java\jdk-21`，开发依赖下载使用系统已配置的本机代理；本次源码验证排除 `compileBundledPi`/`prepareBundledPi`，未生成新的完整发行 JAR。
 - 已核对公开 `.well-known/oauth-authorization-server` 元数据和本机 TokenNest 的客户端创建/loopback URI 匹配源码。注册文档见 `docs/TOKENNEST_LOGIN.md`。
 - 已配置用户提供的客户端 ID，尚未验证该客户端的服务端状态，未进行真实账户浏览器授权、真实令牌刷新或游戏内联网验收；模拟端点测试不代表这些真实链路已经验证。
+
+## 登录成功后 Agent 仍提示未就绪
+
+- NeoForge `run/logs/latest.log` 的 12:10:32 记录“请先配置模型和登录”；对应客户端配置的 `model` 为空。只检查本机凭据的状态字段确认 access/refresh 已保存、access 未过期，未输出令牌。以现有凭据只读查询 `/v1/models` 成功：6 个模型，其中 4 个声明支持 `openai` 聊天端点。
+- 原聊天入口将未登录和未选择模型合并拒绝；登录回调没有填充模型。现在登录成功、恢复世界登录、首次聊天都会在模型为空时异步获取模型，按服务端顺序选择首个兼容聊天端点的模型，保留已有手动配置。首次聊天在准备完成后继续原消息。
+- 模型列表按 `supported_endpoint_types` 排除仅 Responses/图片等不兼容端点；缺失元数据的通用服务采用保守过滤。模型页支持分页选择，仍可手动输入 ID。设置页同步异步选中的模型，避免保存旧界面时重新清空。
+- 模型查询失败保留授权，并明确提示模型获取错误。查询结果绑定世界、登录会话和 API 配置，切换后丢弃旧结果；取消和离开世界重置等待状态。
+- 完整 `gradlew build --offline` 成功，82 项 JUnit、0 失败/错误/跳过。新测试覆盖已登录且模型为空的发现与聊天、失败保留凭据、过期令牌刷新与轮换、旧世界结果隔离、端点兼容筛选和登录成功通知。
+- 两个完整 JAR 已确认包含新模型处理/选择器类、默认 client_id、中文模型入口及五平台 Pi 运行时。
+- Fabric `aibotassist-fabric-0.2.0.jar`：171842567 字节，SHA256 `599b2e61f64e4a54668552da8d44a9175ee6bcd44d418dff431f05cf44740786`。
+- NeoForge `aibotassist-neoforge-0.2.0.jar`：169436154 字节，SHA256 `c5ec3c6f343bd9f7743cd2375ab12e66fadb8d1613e7be025c32733434e3b4a6`。
+- 实际账户只读模型查询通过；尚未用修复包重新进入游戏完成真实模型聊天和界面点击验收。
+
+## 快捷键对话与 AI 状态 HUD（2026-11-13）
+
+- 公共客户端使用 Architectury KeyMappingRegistry / ClientGuiEvent.RENDER_HUD，同一套界面供 Fabric、NeoForge 使用。默认 K，可在原版按键绑定中修改；`/aibot chat` 延迟打开以避开原版聊天关闭流程。
+- 对话界面支持 Enter 发送、滚轮/PageUp/PageDown 浏览、草稿保留、清空、设置、HUD 开关及停止。关闭窗口不取消任务，isPauseScreen=false；发送与原有 @AI 共用入口，消息不发送至公开玩家聊天。对话上下文最多取最近 8 条，记录最多 160 条，离开/进入世界清空。
+- PiBridge 按真实模型请求和工具请求回报准备/思考/执行/等待状态，记录模型轮数、全部工具调用数和耗时；状态与文本绑定运行代次和世界，取消后迟到事件不覆盖终态。停止时清理待回执并通知服务器取消，不回滚已执行效果。
+- 左下角默认半透明状态面板，聊天内即时开关；设置新增「界面」页，开关及 15%～85% 背景不透明度保存（默认 55%），其他设置页保存及模型自动选择保留 HUD 配置。F1、菜单和聊天界面时隐藏面板。
+- Java21 `gradlew build --offline --console=plain` 完整成功，88 项 JUnit，0 失败/错误/跳过。新增 6 项覆盖取消/完成后的迟到事件、清空与跨世界重置、近期上下文过滤和容量限制、失败后重启、旧配置默认值与设置往返。`bun test` 的 5 项真实 Pi SDK 桥接测试通过，27 断言。
+- 两个 JAR 均检查新界面/状态类、完整且键一致的简中/英文语言文件、五平台运行时清单。`git diff --check` 通过。
+- Fabric `aibotassist-fabric-0.2.0.jar`：171866473 字节，SHA256 `892f758769d574fdb8cf2bd166b8faebd2deba68da6e3655c8ee768518af33e3`。
+- NeoForge `aibotassist-neoforge-0.2.0.jar`：169460358 字节，SHA256 `025e2be0f4053f0abd3343b59f8ead0b30d7d4d705d4c119da82bf21f161d7ea`。
+- 未启动游戏进行视觉、缩放、按键冲突、真实账户聊天/停止任务等交互验收；编译和自动化结果不能等同这些游戏内验收。
+
+## 当前视野图片工具（2026-11-13）
+
+- 新增客户端 `capture_view {}`，在 Architectury HUD 渲染回调中、原版 HUD 绘制后及 Screen/本模组 HUD 绘制前读取 Minecraft 渲染目标；不读取桌面或文件。返回相机位置/朝向、第一/第三人称模式、维度、准星方块、时间戳及真实图像数据。公共实现支持 Fabric / NeoForge。
+- NativeImage 读取/缩放在渲染线程，JPEG 编码在 Agent 工作线程；长边最多 960、编码最多 192KiB、每次玩家请求最多 3 张、渲染等待最多 5 秒。内存编码，无截图文件；停止及离开世界取消待捕获请求，图片返回前检查运行和世界。
+- 工具在 ClientMod 本地截获，不向 Minecraft 服务端发送截图；未安装服务器模组时只暴露此客户端工具，安装时保留全部 20 个服务器工具。图片仅供视觉参考，不代替 observe_world 的操作 token/精确坐标或 verify_result。
+- Pi 使用 image 内容块承载图片，工具文本及 details 只含元数据；适配 Chat Completions 时把最新成功截图转换为补充的 user/image_url，保留全部 tool_calls/tool 回执顺序，每次模型请求只带最新一张，避免多张图片重复发送。需要模型支持图片输入及工具调用，HTTP400 增加能力不兼容提示；普通对话不主动截图。
+- Java21 完整 `gradlew build --offline --console=plain` 成功；95 项 JUnit、0 失败/错误/跳过。新增 7 项覆盖原生颜色通道、可解码 JPEG、上下方向和颜色、高分辨率压缩预算、宽高比/小图、两种服务器能力下工具目录、拒绝其他目标参数及已取消请求。
+- `bun test`：6 项真实 Pi SDK 桥接测试、41 断言通过；新增图片经过真实 SDK 后转为 image_url、多工具回执顺序和最新图替换测试。该测试使用模拟图像/模型，不是实际画面识别。
+- 本机 Windows 独立运行时从空临时目录运行，离线 2 轮模型/1 次 capture_view 返回的图片数据进入下一轮模型消息验证通过，不依赖 node_modules。其二进制哈希与发行包清单一致。Linux/macOS 仅完成交叉编译。
+- 两个发行包均检查新视野/编码类、中英文工具文案、bridge-3 清单，并逐项核对五平台程序大小及 SHA256。`git diff --check` 通过。
+- fabric `aibotassist-fabric-0.2.0.jar`：171879605 字节，SHA256 `c404e569ba0efd0776027d431c2c3a2d2bcaa279f3b0c4983a14617d9ad3d7e4`。
+- neoforge `aibotassist-neoforge-0.2.0.jar`：169473638 字节，SHA256 `c35efe76176d61c0a89387d7b77bd738a1096b4eea01bdeb5a051760bd233f72`。
+- 尚未启动游戏验证实际 GPU 截图、光影/模组界面兼容性或真实视觉模型的识别结果；离线图片传递与编码测试不代表这些场景已验收。
+
+## 默认4096格、可调/无限数量及建造后图片校准（2026-11-13）
+
+- 客户端设置新增「建造」页：blockLimit默认4096，可填自定义非负整数，0/「无限制」取消单方案数量上限；visualCalibration默认true，可关闭。旧配置通过字段初始化获得默认值；其它设置页保存、HUD开关和模型选择保留这些字段。设置在下一次玩家请求生效。
+- Plan按设置检查放置/拆除数量，服务端对门/床扩展、自动清障再次计数；移除旧的256硬上限及客户端累计1024预算。无限仅取消方块数量策略，保留原点±16范围、玩家32格活动范围、世界边界/已加载区块、材料和保护权限等。单请求8MiB传输边界、32轮模型/16写调用/10分钟运行预算独立存在。
+- 新增volumes盒体/椭球紧凑描述，最多64个体积；按顺序覆盖，显式blocks覆盖细节；展开后统一校验坐标、唯一方块数量和权限。可用一个16×16×16体积描述4096格，不要求模型逐格生成4096条JSON。
+- 大包使用UTF-8字节分片，每片12000字节、Base64封装后小于32700字节；完整重组后才进入原有服务端校验。校验玩家/调用ID/长度/顺序/超时，取消丢弃未完成传输。旧服务器通过build_protocol检查明确提示更新两端。
+- 同一次玩家请求使用固定BuildAnchor，后续观察生成新token但复用原点和默认朝向；返回绝对origin及玩家当前位置，区域查询返回自身查询中心绝对origin，避免混淆坐标系。测试使用此前日志中的(10,176,-7)与(-3,182,-11)复现移动后坐标保持。
+- 服务端保存完整计划，按最多64格放置或128格独立拆除分tick执行；门/床成对保留，同批扣料/退款，较低支撑先放。全部执行后按每tick最多128格重新检查整个提交计划，然后才报告完成。暂停/取消后已执行世界修改保留，不自动回滚；不同工具调用的蓝图仍分别记录。
+- Pi默认在建筑完成的最终答复前触发capture_view，把图片交回模型，允许修正后再次截图；显式关闭时不触发兜底截图。截图失败或预算用尽时附加视觉复核未完成说明。截图仍最多3次/玩家请求，不能把未入镜的部分当作已经检查。
+- Java21 `gradlew build --offline --console=plain`完整成功；104项JUnit，0失败/错误/跳过。覆盖4096/4913不限数量、用户自定义上限、展开与拆除计数、体积细节覆盖和椭球纵深、4096格完整分包还原、跨玩家/调用/错序/取消/超时拒绝、固定原点、64批无丢格/重复及门床同批、旧配置默认值和保存往返。
+- `bun test`共9项、55断言通过，新增建造→截图→修正→再截图、截图失败提示和关闭校准三条真实Pi SDK流程；输入为模拟工具/模型数据。编译后的Windows独立运行时在空临时目录完成建造→拦截提前结束→截图→模型收到image_url→复核回复的离线验证；已与JAR中程序哈希核对一致。
+- 两个JAR检查新增服务端类、双语建造设置、bridge-4清单，并逐一验证五平台程序大小及SHA256。`git diff --check`通过。
+- fabric `aibotassist-fabric-0.2.0.jar`：171896883 字节，SHA256 `91635916eae84065acdb11d261ec9367525cd67ce7a23bb96b31864b6ce7a50f`。
+- neoforge `aibotassist-neoforge-0.2.0.jar`：169490877 字节，SHA256 `0d886fef508add776cfc914836ecea79c1bbff25c3170f1cb5a2f415e0967587`。
+- 未在实际世界中验收大规模放置、多人保护兼容性、材料结算/中断及帧率；未真实视觉模型识别验收。自动化与离线协议测试不能等同这些场景，Linux/macOS运行时仍仅交叉编译。
+
+
+## 通用模组、存档和机器协作（2026-11-13）
+
+- 新增8个服务器工具、4个客户端工具，目前28+5。服务器覆盖环境/注册表、机器/红石、指令帮助/高级命令、完整存档快照、服务器诊断及机器蓝图；客户端覆盖JEI、Xaero路标/地图图像、崩溃日志。
+- Java21 `gradlew build --offline --console=plain` 完整通过，最终112项JUnit，0失败/错误/跳过。新增用例覆盖完整目录复制（含模组维度/玩家数据）、源存档不变、递归快照拒绝、诊断路径边界/脱敏/分页、四方向漏斗连接、红石支撑和动态状态匹配、合成器槽位NBT边界。
+- Bun真实Pi SDK离线桥接17项通过，104断言：包含新增工具拒绝结果传递，以及capture_view/capture_map图片消息顺序、仅保留最新图片和建造图片校准。
+- 五平台运行时升级pi-0.85.1-bridge-5，文件大小与SHA256逐项通过；打包后的Windows可执行文件在临时空目录完成模拟JEI工具反馈、地图图片向模型传递的离线测试。工具返回为测试数据，不是实际JEI/Xaero运行验收。
+- 两个最终JAR均检查新类、中文/英文语言键一致、JEI API未内嵌、五平台运行时校验值；Fabric JEI入口存在。`git diff --check`通过（仅既有文件LF/CRLF提示）。
+- Fabric `aibotassist-fabric-0.2.0.jar`：171943649字节，SHA256 `efa55703b19ce8db500c7dd499990958e00aaddd86acaea6544ff33024dc8e94`。
+- NeoForge `aibotassist-neoforge-0.2.0.jar`：169538019字节，SHA256 `f1b03845751a6fd7acaa9ee415f46257f95c347696db515281b81e15f93d8c22`。
+- 未启动真实JEI/Xaero客户端做界面验收，未做联机保护插件、所有工业模组、多方块成形及机器持续生产验收。JEI API按官方19.21.0.247源包核对，Xaero按官方分发Minimap26.6.0/WorldMap1.47.0的1.21.1 Fabric JAR核对方法/界面类；不能据此承诺所有旧版/加载器版本兼容。
+- 运行中世界快照不是原子一致性备份；每玩家每服务器会话复用一份，副本持久保留于存档父目录.aibotassist-snapshots。权限、保留、分页和通用模板边界见docs/MOD_COMPATIBILITY.md。
+
+
+## 多人API独立/共享策略（2026-11-13）
+
+- 默认independent：个人API/OAuth凭据留在各自客户端。管理员/存档所有者可在设置的服务器API页面切换shared，或通过服务端配置文件和/aibot api命令管理。共享模型请求经服务器转发，固定端点、模型、输出上限，既有共享密钥不回传客户端。
+- 新增12项自动测试，最终124项JUnit，0失败/错误/跳过；覆盖默认与持久化、无效共享配置、普通/管理员视图不含密钥、每人和全局并发、重复ID、取消/断线状态、固定上游与模型、请求/回复隔离、提供商错误不透传、取消上游。HTTP使用可控测试客户端，未请求真实账户。
+- Java21 gradlew build --offline --console=plain完整通过；两加载器JAR检查新类、策略发送通道检查、语言键一致、私有配置不打包、五平台Pi校验值。Pi运行时未变，仍为bridge-5。git diff --check通过（只有既有LF/CRLF提示）。
+- fabric aibotassist-fabric-0.2.0.jar：171981044字节，SHA256 `dc2f7e0586ee2442722303b8fccfb4996f4d09a63f3d7626bc40c490fcfbbbe9`。
+- neoforge aibotassist-neoforge-0.2.0.jar：169575599字节，SHA256 `e44dc06ea9a3a437971521bb2258fd15267b6ac61c19a06dd464cf81438c6133`。
+- 真实双客户端联机、管理界面交互及真实服务商共享调用尚未实机验收。配置、并发限制、共享消息/截图转发与模式切换行为详见docs/MULTIPLAYER_API.md。
+
+
+## 小图标 HUD、模型接口及 TokenNest 渠道（2026-11-13）
+
+- 左下角 HUD 缩小为 14×14，仅机器人图标和状态颜色，工作时眼睛闪烁；保留关闭和背景不透明度设置。详细状态、轮数和工具信息仍在 K 对话窗口；共享模式使用服务器 ready 状态，不再按个人登录判断。
+- 原模型筛选仅接受 openai 且请求固定 Chat，现根据 supported_endpoint_types 发现并适配 Chat / Responses；模型选择器显示接口，可手动设置 auto/chat/responses。Responses 转换工具声明、调用/回执及截图消息，拒绝未完成/空响应。自定义服务无目录时仍可使用手填 Chat 模型，未支持 Anthropic/Gemini 原生接口。
+- 新增渠道/类型设置，默认 group=default；TokenNest 模型查询和生成请求带 X-TokenNest-Group。OAuth 渠道列表调用 /api/oauth2/groups，新授权 scopes 为 api offline_access groups:read。旧授权需重登，后台 allowed_scopes 也需开放 groups:read。普通 API Key 以其绑定渠道为准，界面和文档明确说明。
+- 模型查询结果绑定世界、登录、地址、client_id、渠道和接口配置；刷新时替换不可用的旧模型，同时避免旧设置界面覆盖异步更新或玩家正在编辑的模型。渠道查询失败保留凭据。共享服务器配置新增 group/modelProtocol，固定协议和渠道，客户端不能覆盖；默认独立模式保留。
+- Java21 完整 gradlew build --offline --console=plain 成功；135 项 JUnit，0 失败/错误/跳过。新增 11 项测试覆盖 Responses 工具/图片转换、响应失败处理、渠道默认值/请求头、端点类型、渠道缓存隔离、API Key/OAuth 渠道查询、自定义服务无目录、服务器固定 Responses 和渠道。
+- 两个 JAR 检查新增 ModelProtocol、HUD/模型/设置/共享类，中英文 143 个语言键一致；五平台内嵌 bridge-5 程序大小及 SHA256 全部验证。Pi 运行时源码未改变，本轮未重复 Bun 测试。git diff --check 通过。
+- Fabric aibotassist-fabric-0.2.0.jar：171989985 字节，SHA256 f83f8d2fb1e2040088d111c281f8fcc8cad7fda316320b0e40d68c98f76cd31d。
+- NeoForge aibotassist-neoforge-0.2.0.jar：169584523 字节，SHA256 ff8d19503860c9740b507ad58e3cd816a144aab9e5bb6bb292354ff31de72649。
+- 未启动游戏进行图标视觉/缩放或双客户端联机验收，未使用真实 TokenNest 账户验证渠道授权、模型生成和 Responses 工具往返；HTTP 测试使用模拟请求，不代表真实提供商链路已验收。未修改或部署 TokenNest 后端。
+
+
+## 聊天窗口文字被模糊背景覆盖（2026-11-13）
+
+- 用户截图中自绘标题、工作状态、对话和底部提示模糊，按钮及输入框正常。检查本地 Minecraft 1.21.1 映射后的 Screen 字节码，确认 Screen.render 先调用 renderBackground（含全屏 blur），再绘制控件；AgentChatScreen 原来在自绘文字后调用 super.render，因此文字先被绘制后参与了模糊。
+- 将面板背景移动到 renderBackground 覆写，先调用原版背景模糊，再绘制半透明面板；render 先调用原版背景/控件流程，再绘制标题、状态、对话及提示。发送/停止按钮状态在控件绘制前更新。保留原有滚动、裁剪、草稿和按键行为。
+- 已核对编译后的 AgentChatScreen 字节码，确认模糊在背景覆写的开头调用，Screen.render 在所有自绘文字之前调用；其余设置/模型/服务器界面已使用正确顺序。按原版最小 GUI 320×240 及截图对应布局检查顶部按钮、日志和输入区域间距，未发现重叠。
+- 本次为局部绘制顺序调整，未新增镜像实现的单元测试。实机视觉效果仍待新版本重启游戏后确认。
+- Java21 完整 gradlew build --offline --console=plain 通过；135 项 JUnit，0 失败/错误/跳过。两个发行包均通过 javap 核对新背景覆写和文字前的父类绘制调用（Fabric 对应 method_25420 / method_25394）；git diff --check 通过。
+- fabric aibotassist-fabric-0.2.0.jar：171990019 字节，SHA256 6912fa7dbe9d2ab1ae6eec2fda94011d5afbf8952e4ae8e89f7487d560f1c4cc。
+- neoforge aibotassist-neoforge-0.2.0.jar：169584570 字节，SHA256 97f8843ff7b6391571e36379308abfb37086ca1442ddd9db666f9a1d5ae25c28。
+- 2026-11-13：按存档与玩家 UUID 保存独立会话，并加入假人/远程区域图像工具。
+  - 会话键包含服务器/单人存档来源、服务端持久存档标识和实际玩家 UUID。客户端 AES-GCM 加密、身份范围绑定、原子替换，保存最近160条聊天与草稿；约每2秒保存变更，离开/正常退出提交保存。恢复最近8条玩家/助手背景，不恢复旧工具 token 或任务。错误记录保留原文件，禁止覆盖。最大记录8MiB，覆盖 JSON 转义后长文本。
+  - 新增 WorldIdentityTest 2项、ChatSessionStoreTest 8项和 RemoteViewSpecTest 3项；测试覆盖重启、存档/UUID/服务器来源隔离、密文交换/篡改拒绝、清空、恢复空闲状态、中文及大量转义字符长对话、坏记录保留与相机参数验证。最终JUnit共148项，0失败0错误。
+  - Java21执行 `gradlew.bat build --offline --console=plain` 完整成功；已重建 common JAR 和两平台安装包。Pi五平台更新为 `pi-0.85.1-bridge-6`。Bun桥测试19项通过，123次断言，0失败。
+  - 最终JAR均通过 ZIP CRC 校验；检查新增会话/假人/远程渲染类、FakePlayers 平台转换目标、中英文146个语言键相同、五平台运行时大小/SHA256与manifest一致，未打包本地会话、密钥或服务器API配置。在无node_modules临时目录执行包内Windows运行时，以模拟远程图片完成2轮模型/1次工具的离线传递验证；不代表真实模型或GPU渲染已验收。
+  - Fabric `aibotassist-fabric-0.2.0.jar`：172037052字节，SHA256 `2ee54ad1e2179fda809815c306c5b2be526453a1d4fbe52c90611a07f01026e0`。
+  - NeoForge `aibotassist-neoforge-0.2.0.jar`：169629988字节，SHA256 `954917ef6688140e7d0b66ebc27fbfd77df6334a98b353f5d25a22a6e55e61b7`。
+  - 尚未完成真实双客户端重进/换UUID界面验收、假人在保护/机器模组中的交互及实际GPU远程渲染验证。远程图像为最多33³格区域模型渲染，缺少实体/动态方块实体；显式load_chunks可能同步生成最多9个区块并造成卡顿，详见docs/FAKEPLAYER.md。服务端未安装模组时只能按来源/UUID隔离，不能识别远端存档更换。
