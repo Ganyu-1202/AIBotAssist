@@ -2,6 +2,51 @@ import { test, expect } from 'bun:test';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
+test('malformed model tool JSON emits a stage diagnostic without raw arguments',async()=>{
+ const child=spawn(process.execPath,['index.mjs'],{cwd:import.meta.dir,stdio:['pipe','pipe','pipe']});
+ const write=m=>child.stdin.write(JSON.stringify(m)+'\n');let diagnostics=[];
+ try{await new Promise((resolve,reject)=>{
+  const timeout=setTimeout(()=>reject(new Error('Diagnostic timeout')),15000);child.on('error',reject);
+  createInterface({input:child.stdout}).on('line',line=>{try{
+   const m=JSON.parse(line);
+   if(m.kind==='ready')write({kind:'start',prompt:'Test',system:'Test',tools:[]});
+   else if(m.kind==='model')write({kind:'response',id:m.id,result:{role:'assistant',content:null,tool_calls:[{id:'bad',type:'function',function:{name:'observe_world',arguments:'SECRET_ARGUMENT_NOT_JSON'}}]}});
+   else if(m.kind==='diagnostic')diagnostics.push(m);
+   else if(m.kind==='done'){clearTimeout(timeout);resolve();}
+  }catch(e){clearTimeout(timeout);reject(e);}});
+ });expect(diagnostics).toContainEqual({kind:'diagnostic',stage:'tool_arguments_json',error_type:'SyntaxError'});expect(JSON.stringify(diagnostics)).not.toContain('SECRET_ARGUMENT');
+ }finally{child.stdin.end();child.kill();}
+},20000);
+
+for(const scenario of ['machine-static','mismatched','verification-rejected']) {
+ test(`construction completion enforces structural review: ${scenario}`,async()=>{
+  const child=spawn(process.execPath,['index.mjs'],{cwd:import.meta.dir,stdio:['pipe','pipe','pipe']});
+  const write=m=>child.stdin.write(JSON.stringify(m)+'\n');let models=0,verifications=0,text='';
+  try {await new Promise((resolve,reject)=>{
+   const timeout=setTimeout(()=>reject(new Error('Structural review timeout')),15000);child.on('error',reject);
+   createInterface({input:child.stdout}).on('line',line=>{try{
+    const m=JSON.parse(line);
+    if(m.kind==='ready')write({kind:'start',prompt:'Build',system:'Test',language:'zh_cn',visual_review:false,tools:['build_structure','verify_result'].map(name=>({type:'function',function:{name,description:'Test',parameters:{type:'object',properties:{task_id:{type:'string'}},additionalProperties:false}}}))});
+    else if(m.kind==='model'){
+     models++;
+     const result=models===1?{role:'assistant',content:null,tool_calls:[{id:'build',type:'function',function:{name:'build_structure',arguments:'{}'}}]}:{role:'assistant',content:'Ready'};
+     write({kind:'response',id:m.id,result});
+    }else if(m.kind==='tool'){
+     let result={status:'completed',task_id:'build'};
+     if(m.name==='verify_result'){
+      verifications++;expect(m.args.task_id).toBe('build');
+      result=scenario==='verification-rejected'?{status:'rejected',reason:'No blueprint'}:{status:'completed',matches:scenario!=='mismatched',function_verified:false,machine_diagnostics:scenario==='machine-static'?[{state:'dispenser'}]:[]};
+     }
+     write({kind:'response',id:m.id,result});
+    }else if(m.kind==='text')text+=m.text;
+    else if(m.kind==='done'){clearTimeout(timeout);expect(m.error).toBeNull();resolve();}
+   }catch(e){clearTimeout(timeout);reject(e);}});
+  });expect(models).toBe(3);expect(verifications).toBe(1);
+  expect(text).toContain(scenario==='machine-static'?'机器运行验收未完成':'建筑结构复核未通过或未完成');
+  }finally{child.stdin.end();child.kill();}
+ },20000);
+}
+
 test('actual Pi SDK performs model → tool → tool result → model → completion', async()=>{
   const child=spawn(process.execPath,['index.mjs'],{cwd:import.meta.dir,stdio:['pipe','pipe','pipe']});
   let modelCalls=0, toolCalls=0, text='', errors='';
@@ -35,7 +80,7 @@ test('actual Pi SDK performs model → tool → tool result → model → comple
   }finally{child.stdin.end();child.kill();}
 },20000);
 
-for (const toolName of ['query_recipes','process_items','build_structure','get_task_status','query_jei','read_xaero_map','world_snapshot','inspect_machine','machine_blueprint','run_advanced_command','read_client_diagnostics','fakeplayer_control']) {
+for (const toolName of ['read_agent_skill','analyze_redstone_plan','query_mod_operations','run_mod_operation','query_recipes','process_items','build_structure','get_task_status','query_jei','read_xaero_map','world_snapshot','inspect_machine','machine_blueprint','run_advanced_command','read_client_diagnostics','fakeplayer_control']) {
  test(`actual Pi proxies ${toolName} and preserves rejected result`,async()=>{
   const child=spawn(process.execPath,['index.mjs'],{cwd:import.meta.dir,stdio:['pipe','pipe','pipe']});
   const write=m=>child.stdin.write(JSON.stringify(m)+String.fromCharCode(10));let calls=0,toolCalls=0;

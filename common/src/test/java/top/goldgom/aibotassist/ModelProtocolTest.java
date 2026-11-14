@@ -17,6 +17,7 @@ class ModelProtocolTest {
             [{"type":"function","function":{"name":"capture_view","description":"See game","parameters":{"type":"object","properties":{}}}}]
             """).getAsJsonArray();
         var body=ModelProtocol.body("responses","chosen",messages,tools);
+        assertTrue(body.get("stream").getAsBoolean());
         assertEquals("/responses",ModelProtocol.path("responses"));assertFalse(body.get("store").getAsBoolean());assertFalse(body.has("messages"));assertEquals(12000,body.get("max_output_tokens").getAsInt());
         var input=body.getAsJsonArray("input");assertEquals(4,input.size());assertEquals("call-1",input.get(1).getAsJsonObject().get("call_id").getAsString());
         assertEquals("function_call_output",input.get(2).getAsJsonObject().get("type").getAsString());assertEquals("camera metadata",input.get(2).getAsJsonObject().get("output").getAsString());

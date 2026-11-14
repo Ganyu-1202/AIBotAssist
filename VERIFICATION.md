@@ -290,3 +290,41 @@
   - Fabric `aibotassist-fabric-0.2.0.jar`：172037052字节，SHA256 `2ee54ad1e2179fda809815c306c5b2be526453a1d4fbe52c90611a07f01026e0`。
   - NeoForge `aibotassist-neoforge-0.2.0.jar`：169629988字节，SHA256 `954917ef6688140e7d0b66ebc27fbfd77df6334a98b353f5d25a22a6e55e61b7`。
   - 尚未完成真实双客户端重进/换UUID界面验收、假人在保护/机器模组中的交互及实际GPU远程渲染验证。远程图像为最多33³格区域模型渲染，缺少实体/动态方块实体；显式load_chunks可能同步生成最多9个区块并造成卡顿，详见docs/FAKEPLAYER.md。服务端未安装模组时只能按来源/UUID隔离，不能识别远端存档更换。
+
+- 2026-11-14：红石大炮及后续建造预检故障修复。
+  - 读取最新及归档Fabric日志、只读解码当前New World目标区域：大炮弹丸支路的中继器末端输出到空气；11月14日04:53/04:55两次preview_task均因Plan.parse重复坐标拒绝。详细证据、诊断边界及修复说明见docs/BUILD_DIAGNOSIS_2026-11-14.md。
+  - 完全相同的显式方块去重，不重复计材料；不同状态/方块/NBT在同坐标仍拒绝并回传冲突位置。保留已匹配方块及容器库存；NBT显式请求另比较。方案展开保留动态状态的“未指定”语义，显式电气与结构约束仍严格。最后放置后等待20tick再核对全部原始期望方块。
+  - 新增红石输入/输出位置、延时和空端口诊断，verify_result明确标记静态结构范围和function_verified=false。bridge-7在接受最终建造答复前补做结构复核，附机器未验收或结构复核失败说明；复核拒绝不自动无限重试。参数原因直接回传，10分钟任务期限与SDK问题区分，服务端增加调用ID与建造增量日志。
+  - 在独立目录.gradle/repair-build-src执行Java21 `gradlew.bat -p .gradle/repair-build-src build --offline --console=plain --max-workers=2`，完整通过。编译来源与工作区common/fabric/neoforge源码及运行时源码SHA256逐文件一致；不替换运行中开发实例监视的common开发JAR。两平台最终发布包复制回对应build/libs。
+  - JUnit159项，0失败、0错误、0跳过；包括重复坐标材料去重/冲突详情、隐式/显式动态状态、保留现有发射器及请求NBT差异、全部水平朝向端口、实际大炮末端坐标及超时提示。Bun22项通过、138次断言、0失败。
+  - 两包ZIP CRC通过，检查BuildReconciliation/RedstoneDiagnostics、会话/假人类和平台转换目标；中英文146键一致，五平台bridge-7运行时大小及SHA256均匹配manifest，无本地会话和密钥。在空临时目录执行包内Windows程序，通过模拟远程图片传递，以及自动结构复核/机器未验收提示两项离线协议验证。
+  - Fabric：172047428字节，SHA256 `b3b924a4b4548e939c2732cc687b364739cbca1c1f934619b8f17eb2faa45dae`。
+  - NeoForge：169640446字节，SHA256 `e7798b2736425d5e187bcde48d2a4afd8de5e26abd8998675fbe309084b4f962`。
+  - 未修改原存档、未接通或触发带TNT电路，未做真实游戏中的大炮运行和修复后轰炸机建造验收。当前游戏需退出后加载新包；开发环境重新运行runClient。旧实例的热更新不能可靠替换新增字段/类。git diff --check通过。
+- 2026-11-14：增加 AI 请求链路调试信息（bridge-8）。
+  - 每次请求生成诊断编号，记录阶段、累计耗时、模型/渠道/协议、HTTP状态/响应大小/请求ID、响应字段类型、工具调用关联ID、Pi握手与退出状态；游戏错误提示附编号和阶段。共享API异步响应单独记录服务端诊断编号。
+  - 异常保留类型、有限原因链及堆栈位置；Pi stderr持续排空，仅记录字符数和已知错误类别，样本上限8192字符；单范围最多512事件。不新增原始异常消息、模型正文、工具参数、图片或令牌日志。操作说明见docs/DEBUGGING.md。
+  - 独立目录Java21 Gradle完整build成功；164项JUnit，0失败/错误/跳过。Bun首轮3项超时，随后未改超时阈值重跑，23项全部通过、140次断言。新增覆盖响应/错误脱敏、线程范围恢复、诊断提示和模型工具参数JSON错误阶段。
+  - 192份编译输入文件与工作区逐文件SHA256一致（不含文档）。两个发行包ZIP CRC、诊断/会话/假人类、平台转换、中英文146语言键、五平台bridge-8运行时大小及哈希检查通过；无本地会话/密钥配置。包内Windows程序在无node_modules临时目录通过模拟图片传递、强制结构复核和损坏工具JSON诊断/脱敏三项验证。
+  - Fabric：172057623字节，SHA256 `b12605c4e320ea709577989b404c1a26bba27a30737bf581b0b5a45c82429344`。
+  - NeoForge：169650635字节，SHA256 `0ca896708fe8e322a5fad2d5ab0427e1fa9011a1f48a5d9d4954aaf5545f743d`。
+  - 未停止运行中的游戏，未修改存档，未实测真实TokenNest请求或多人游戏诊断。旧失败缺失的信息无法补回，需重启加载新版后复现；其他操作系统运行时仅做包完整性验证。git diff --check通过。
+- 2026-11-14：修复 Responses completed 空输出导致 AI 在工具执行前停止。
+  - Fabric最新日志08:58:57–08:59:08，诊断7089bed9-32e，请求ID202611141359018050113958268d9d69CaaQeAe：gpt-6.1-terra/default选择responses，HTTP200/20611字节，status=completed/output=[]，ModelProtocol.message解析失败。该请求没有进入游戏工具执行。
+  - 使用当前本地凭据对已配置TokenNest端点发起无游戏副作用的诊断工具测试：非流式HTTP200返回空output；流式HTTP200包含function_call的output_item.done，但response.completed仍为空output。未打印或保存令牌、原始HTTP正文，未修改服务端或登录配置。
+  - Responses改用stream=true；新增共用ModelResponseReader，按输出索引还原已完成项，最终非空output优先，避免重复调用。失败/中断/只有delta或added的响应不能释放工具；真正空输出返回明确提示，无重试。独立API和服务器共享API均接入，JSON提供商仍兼容。
+  - 使用本次编译的Java ModelProtocol/ModelResponseReader完成真实TokenNest两轮请求：成功读取diagnostic_echo调用、回传模拟工具结果、收到最终文本；两轮均HTTP200。仅模拟工具结果，未操作Minecraft世界。
+  - 隔离目录Java21完整Gradle build成功，173项JUnit全部通过（新增9项）；189份模块源码与构建输入SHA256一致。运行时源码未变，保留bridge-8；未重复Bun源码测试。两发行包ZIP、五平台运行时哈希、146语言键、平台转换、新解析器类及无凭据检查通过；包内Windows运行时图片/结构复核/异常诊断三项检查通过。
+  - Fabric：172062552字节，SHA256 `8542c0512a3c2c055026d44f7c9bfd12c799ee13f9a3b44bfe72b3b67179e142`。
+  - NeoForge：169655564字节，SHA256 `e06d805a4ee8695dca17499a40fba691abba95f787e5ec7eeb471349af466477`。
+  - 未停止用户游戏或修改存档，未执行带TNT的大炮或真实建造验收。需替换客户端/服务端模组并重启；开发实例重新runClient。git diff --check通过。
+- 2026-11-14：模型重试、游戏内红石skill与第三方模组扩展API（bridge-9）。
+  - 模型请求最多3次尝试，1秒/2秒退避；网络I/O/超时、HTTP408/429/5xx、空响应/断流/损坏工具参数可重试；认证权限、明确非暂时失败等不重试。不重放游戏工具或整轮agent。独立API检查取消/登录版本，共享API在同一并发名额内异步重试，取消撤销待尝试/上游请求。共享诊断编号跨尝试保持一致。共享总预算300秒，客户端310秒，Pi模型RPC330秒，工具仍110秒。
+  - `.agents/skills/minecraft-redstone/SKILL.md` 原文随模组打包，read_agent_skill可发现/读取，系统提示按红石任务路由。内容覆盖Java1.21.1端口朝向、信号衰减、时序、支撑、活塞/侦测器、发射器、漏斗/合成器、启停和功能验收。新增analyze_redstone_plan的静态端口/支撑检查及signal_test/piston_test四向蓝图，实际机器诊断增加活塞/侦测器端口，静态结果始终不宣称功能验证。
+  - 公共API AgentExtensions.register/registerCommand支持COMMAND/MACHINE描述、参数schema、权限/副作用、验收说明和服务器主线程handler。query_mod_operations按当前玩家权限分页，run_mod_operation在修改前验证观察token/维度/过期/建造冲突；继承call ID去重。schema和参数复制、校验并限量，修改handler异常返回unknown，不自动重试。目标所有权、保护和机器资源规则仍由第三方模组实现，见docs/MOD_EXTENSIONS.md示例。
+  - 192项JUnit全部通过，0失败/错误/跳过；涵盖重试上限/取消/认证不重试、客户端与共享HTTP恢复、损坏参数仅产生一次工具执行、注册/schema隔离及异常未知状态、技能打包读取、四向蓝图输出端口、侦测器/活塞方向。Bun首轮4项冷启动超时，保持原阈值重跑后27项全通过、160次断言，包含四个新工具的实际Pi桥转发。
+  - Gradle依赖目录扫描缓慢，停止本轮自启的构建进程后，直接运行bun build.mjs生成五平台bridge-9；复用未变的依赖，Gradle跳过prepareBundledPi/compileBundledPi后完成build。最后两处诊断/测试调整后，`:common:test :fabric:build :neoforge:build --offline --console=plain --max-workers=2 -x :common:prepareBundledPi -x :common:compileBundledPi`再次成功。205份编译输入（含构建配置、运行时、skill）SHA256与工作区一致。
+  - 两个发行包ZIP CRC、API/重试/技能类、平台转换、146语言键和五平台运行时大小/哈希均通过；内嵌skill与源文件逐字节一致，无本地凭据/会话配置。包内Windows运行时的模拟图片传递、强制结构复核和异常诊断三项验证通过。
+  - Fabric：172094853字节，SHA256 `717d2f652cc5d82566a57138ff4cdb7e78f1f0de3f5f4560d8bf497349a38cc1`。
+  - NeoForge：169687896字节，SHA256 `61c1d87f840e256f1934bab54d9b823c0958c34c93d7d0d2b6333be0557c671f`。
+  - 本轮未实际接入第三方机器模组、未在游戏世界中触发红石/TNT、未修改存档；能力验证为静态/模拟测试，机器功能和模组保护适配仍需实机验收。只替换对应发行包，不触碰运行中开发实例的common JAR；重启更新后生效。源码/文档git diff --check通过；已有IDE生成的bin改动保留。

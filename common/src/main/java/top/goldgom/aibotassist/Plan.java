@@ -31,8 +31,8 @@ public record Plan(String reply, List<Placement> blocks, List<String> commands, 
         if(!o.has("blocks")&&!o.has("volumes"))throw new IllegalArgumentException("方案需要blocks或volumes");
         JsonArray a = o.getAsJsonArray("blocks");
         if(a==null)a=new JsonArray();
-        checkLimit(limit,a.size());
         Map<String,Placement> expanded=volumes(o,limit);
+        Map<String,Placement> explicit=new LinkedHashMap<>();
         List<Placement> result = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (JsonElement e : a) {
@@ -42,7 +42,6 @@ public record Plan(String reply, List<Placement> blocks, List<String> commands, 
             if (Math.abs((long)x) > RADIUS || Math.abs((long)y) > RADIUS || Math.abs((long)z) > RADIUS)
                 throw new IllegalArgumentException("超出建造半径");
             if (!validBlockId(id)) throw new IllegalArgumentException("方块ID格式无效");
-            if (!seen.add(x + "," + y + "," + z)) throw new IllegalArgumentException("重复坐标");
             Map<String,String> properties=new LinkedHashMap<>();
             if(b.has("properties")&&!b.get("properties").isJsonNull())for(var entry:b.getAsJsonObject("properties").entrySet()){
                 if(properties.size()>=32||!entry.getKey().matches("[a-z0-9_]{1,64}")||!entry.getValue().getAsString().matches("[a-z0-9_-]{1,64}"))throw new IllegalArgumentException("方块状态无效");
@@ -50,7 +49,14 @@ public record Plan(String reply, List<Placement> blocks, List<String> commands, 
             }
             String nbt=b.has("nbt")&&!b.get("nbt").isJsonNull()?b.get("nbt").getAsString():"";
             if(nbt.length()>8192)throw new IllegalArgumentException("方块NBT过长");
-            expanded.put(x+","+y+","+z,new Placement(x,y,z,id,properties,nbt));
+            String coordinate=x+","+y+","+z;
+            Placement placement=new Placement(x,y,z,id,properties,nbt);
+            Placement previous=explicit.putIfAbsent(coordinate,placement);
+            if(previous!=null) {
+                if(previous.equals(placement))continue;
+                throw new IllegalArgumentException("坐标（"+coordinate+"）重复且方块/状态/NBT冲突："+previous.block()+previous.properties()+" 与 "+id+properties+"。请合并为唯一方块；体积覆盖请使用volumes，显式blocks最后覆盖。NBT内容未显示。");
+            }
+            seen.add(coordinate);expanded.put(coordinate,placement);
             checkLimit(limit,expanded.size());
         }
         result.addAll(expanded.values());

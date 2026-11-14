@@ -18,6 +18,8 @@ public final class ModelProtocol {
         body.addProperty(responses?"max_output_tokens":"max_tokens",12000);
         if(!responses)body.add("messages",messages.deepCopy());
         else {
+            // Some Responses providers omit output from the terminal envelope; completed SSE items retain it.
+            body.addProperty("stream",true);
             body.addProperty("store",false);
             JsonArray input=new JsonArray();
             for(JsonElement entry:messages){
@@ -54,10 +56,14 @@ public final class ModelProtocol {
         }return body;
     }
     public static JsonObject message(String protocol,JsonObject reply){
-        if(!"responses".equals(protocol))return reply.getAsJsonArray("choices").get(0).getAsJsonObject().getAsJsonObject("message");
+        if(!"responses".equals(protocol)){
+            if(reply.has("error")&&!reply.get("error").isJsonNull())throw new ResponseFailure("模型返回错误，请检查提供商状态。",false);
+            try{return reply.getAsJsonArray("choices").get(0).getAsJsonObject().getAsJsonObject("message");}
+            catch(RuntimeException e){throw new ResponseFailure("模型响应缺少有效choices/message。");}
+        }
         if(reply.has("error")&&!reply.get("error").isJsonNull() || reply.has("status")&&!"completed".equals(reply.get("status").getAsString()))
             throw new IllegalStateException("Responses生成未完成，请检查模型状态或输出限制");
-        JsonArray output=reply.getAsJsonArray("output");if(output==null)throw new IllegalArgumentException("Responses响应缺少output");
+        JsonArray output=reply.getAsJsonArray("output");if(output==null)throw new ResponseFailure("Responses响应缺少output");
         StringBuilder text=new StringBuilder();JsonArray calls=new JsonArray();
         for(JsonElement entry:output){JsonObject item=entry.getAsJsonObject();String type=item.get("type").getAsString();
             if(type.equals("message"))for(JsonElement part:item.getAsJsonArray("content")){
@@ -68,7 +74,13 @@ public final class ModelProtocol {
                 JsonObject c=new JsonObject(),fn=new JsonObject();c.addProperty("type","function");c.add("id",item.get("call_id"));fn.add("name",item.get("name"));fn.add("arguments",item.get("arguments"));c.add("function",fn);calls.add(c);
             }
         }
-        if(text.isEmpty()&&calls.isEmpty())throw new IllegalArgumentException("Responses未返回文本或工具调用");
+        if(text.isEmpty()&&calls.isEmpty())throw new ResponseFailure("模型响应已结束，但未返回文本或工具调用；未执行本轮工具，请检查提供商响应。");
         JsonObject message=new JsonObject();message.addProperty("role","assistant");message.addProperty("content",text.toString());if(!calls.isEmpty())message.add("tool_calls",calls);return message;
+    }
+    public static final class ResponseFailure extends IllegalArgumentException implements ModelRetry.Retryable {
+        private final boolean retry;
+        public ResponseFailure(String message){this(message,true);}
+        public ResponseFailure(String message,boolean retry){super(message);this.retry=retry;}
+        public boolean retryable(){return retry;}
     }
 }

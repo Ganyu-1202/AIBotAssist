@@ -3,6 +3,12 @@ import com.google.gson.*;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 class AgentArgumentsTest {
+ @Test void customMachinesAndLargeWallsReceiveActionableErrors(){
+  JsonObject a=JsonParser.parseString("{\"token\":\"t\",\"kind\":\"cannon\",\"width\":8,\"depth\":8,\"height\":4,\"material\":\"minecraft:stone\"}").getAsJsonObject();
+  assertTrue(assertThrows(IllegalArgumentException.class,()->AgentToolCatalog.validateArgs("build_structure",a)).getMessage().contains("execute_task"));
+  a.addProperty("kind","wall");a.addProperty("width",30);
+  assertTrue(assertThrows(IllegalArgumentException.class,()->AgentToolCatalog.validateArgs("build_structure",a)).getMessage().contains("3到11"));
+ }
  @Test void missingDimensionsReturnsActionableError(){JsonObject a=JsonParser.parseString("{\"token\":\"t\",\"kind\":\"house\"}").getAsJsonObject();var e=assertThrows(IllegalArgumentException.class,()->AgentToolCatalog.validateArgs("build_structure",a));assertTrue(e.getMessage().contains("width"));}
  @Test void paletteWithoutMaterialHasExplicitFallback(){JsonObject a=JsonParser.parseString("{\"token\":\"t\",\"kind\":\"house\",\"width\":5,\"depth\":5,\"height\":4,\"palette\":{\"wall\":\"minecraft:birch_planks\",\"roof\":\"minecraft:stone_bricks\"}}").getAsJsonObject();assertDoesNotThrow(()->AgentToolCatalog.validateArgs("build_structure",a));assertEquals("minecraft:birch_planks",AgentToolCatalog.fallbackMaterial(a));}
  @Test void emptyMaterialsAndFractionalDimensionsRejected(){JsonObject a=JsonParser.parseString("{\"token\":\"t\",\"kind\":\"house\",\"width\":5,\"depth\":5,\"height\":4}").getAsJsonObject();assertThrows(IllegalArgumentException.class,()->AgentToolCatalog.validateArgs("build_structure",a));a.addProperty("material","minecraft:stone");a.addProperty("width",5.5);assertThrows(IllegalArgumentException.class,()->AgentToolCatalog.validateArgs("build_structure",a));}

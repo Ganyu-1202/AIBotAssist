@@ -156,12 +156,13 @@ public final class ClientMod {
             try {
                 PiBridge.run(snapshot,prompt,serverMod,(messages,tools)->{
                     if(generation!=run||mc.getConnection()!=session||mc.level!=level)throw new InterruptedException();
-                    return shared?ClientServerApi.turn(apiPolicy.revision(),messages,tools):connection.agentTurn(snapshot,messages,tools);
+                    return shared?ClientServerApi.turn(apiPolicy.revision(),messages,tools):connection.agentTurn(snapshot,messages,tools,()->generation!=run||mc.getConnection()!=session||mc.level!=level);
                 },(name,args)->{
                     if(generation!=run)throw new InterruptedException();
                     if(ClientVision.isLocalCapture(name))return ClientVision.capture(args,()->generation==run && mc.getConnection()==session && mc.level==level,name.equals(ClientVision.MAP_TOOL));
                     if(ClientIntegrations.NAMES.contains(name))return ClientIntegrations.request(name,args,()->generation==run && mc.getConnection()==session && mc.level==level);
                     String call=java.util.UUID.randomUUID().toString();
+                    AgentDebug.note("server_tool","call="+call+" tool="+AgentDebug.label(name));
                     CompletableFuture<JsonObject> future=new CompletableFuture<>();
                     JsonObject packet=new JsonObject();packet.addProperty("call",call);packet.addProperty("build_session",buildSession);packet.addProperty("block_limit",snapshot.blockLimit);
                     packet.addProperty("action",name.equals("observe_world")?"agent_observe":name.equals("execute_task")?"agent_execute":"agent_tool");

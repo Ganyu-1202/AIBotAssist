@@ -25,6 +25,10 @@
 
 真实Pi Agent核心0.85.1驱动30个服务器游戏工具和5个客户端工具；详见 [工具参数及安全边界](agent-runtime/TOOLS.md)。独立模式由客户端保存个人凭据并发送模型请求，共享模式由服务器保存共享连接并转发；Pi不接收密钥，服务器裁决权限、模式、材料与世界操作。熔炼/酿造遵循原版tick，任务恢复限制见工具文档。
 
+建造方案会合并完全相同的重复方块，冲突会给出具体坐标；已符合方案的方块和库存会保留。完成后自动复核结构，红石机器还会返回端口诊断；“方块匹配”不代表机器已通过运行验收。最近大炮与后续预检故障的证据和修复说明见 [建造问题分析](docs/BUILD_DIAGNOSIS_2026-11-14.md)。
+
+AI请求失败时，聊天窗口显示诊断编号和失败阶段，可在实例的 `logs/latest.log` 搜索对应编号，查看接口类型、HTTP状态、响应结构、异常堆栈及工具调用。调试日志默认启用，记录元数据而不输出完整模型正文、密钥或图片；详见 [调试信息说明](docs/DEBUGGING.md)。
+
 ## 多人游戏 API 配置
 
 默认 **每人独立配置 API**，各玩家使用自己的客户端密钥或 TokenNest 登录。管理员可在「设置 → 服务器 API」切换为**服务器共享 API**，填写地址、模型、密钥并保存；共享后玩家无需个人登录，共享密钥保存在服务器，不回传玩家。对话和任务仍按玩家隔离，游戏权限照常检查。
@@ -69,6 +73,8 @@ $env:JAVA_HOME='D:\Program Files\Java\jdk-21'
 发布产物：fabric/build/libs/aibotassist-fabric-0.2.0.jar、neoforge/build/libs/aibotassist-neoforge-0.2.0.jar。0.2.0为本次完整构建，安装前移除旧版本JAR。
 
 验证记录见 [VERIFICATION.md](VERIFICATION.md)。
+
+模型临时错误默认最多尝试3次，仅重试模型生成，不重放世界操作。游戏内红石设计可用 `read_agent_skill` 加载 [红石skill](.agents/skills/minecraft-redstone/SKILL.md)，再用 `analyze_redstone_plan` 检查端口/支撑；新增灯和活塞测试蓝图。第三方模组可通过 [扩展API](docs/MOD_EXTENSIONS.md) 注册命令、机器操作及验收说明，AI使用 `query_mod_operations` / `run_mod_operation` 发现并调用。
 
 ## 0.2.0 本地凭据
 

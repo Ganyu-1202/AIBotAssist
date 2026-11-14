@@ -8,6 +8,21 @@ import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ModelRoutingTest {
+    @Test void cancelledAgentDoesNotMakeAnotherProviderAttempt()throws Exception{
+        var s=new ClientSettings();s.modelProtocol="chat";var cancelled=new java.util.concurrent.atomic.AtomicBoolean();var calls=new java.util.concurrent.atomic.AtomicInteger();
+        var c=new AiConnection(new LocalCredentials(dir),(settings,form)->{throw new AssertionError();},(settings,token,path,body)->{calls.incrementAndGet();cancelled.set(true);throw new PiDiagnostics.HttpFailure(503);});
+        try{c.enter("world",s);c.setKey("test");assertThrows(InterruptedException.class,()->c.agentTurn(s,new JsonArray(),new JsonArray(),cancelled::get));assertEquals(1,calls.get());}finally{c.logout();}
+    }
+    @Test void modelHttpRetryUsesSameConversationAndDoesNotRepeatCatalog()throws Exception{
+        var s=new ClientSettings();s.modelProtocol="chat";s.model="test";
+        var count=new java.util.concurrent.atomic.AtomicInteger();
+        var c=new AiConnection(new LocalCredentials(dir),(settings,form)->{throw new AssertionError();},(settings,token,path,body)->{
+            assertEquals("/chat/completions",path);assertEquals("test",body.get("model").getAsString());
+            if(count.incrementAndGet()==1)throw new PiDiagnostics.HttpFailure(502);
+            return json("{\"choices\":[{\"message\":{\"content\":\"ready\"}}]}");
+        });
+        try{c.enter("world",s);c.setKey("test");assertEquals("ready",c.agentTurn(s,new JsonArray(),new JsonArray()).get("content").getAsString());assertEquals(2,count.get());}finally{c.logout();}
+    }
     @TempDir Path dir;
     private static JsonObject json(String text){return JsonParser.parseString(text).getAsJsonObject();}
     @Test void channelDefaultsAndRequestHeadersApplyOnlyToTokenNest(){

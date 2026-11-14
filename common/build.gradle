@@ -30,5 +30,11 @@ tasks.register('compileBundledPi', Exec) {
     outputs.dir(layout.buildDirectory.dir('generated/pi'))
 }
 sourceSets.main.resources.srcDir(layout.buildDirectory.dir('generated/pi'))
-tasks.named('processResources') { dependsOn 'compileBundledPi' }
+tasks.named('processResources') {
+    dependsOn 'compileBundledPi'
+    from(rootProject.file('.agents/skills/minecraft-redstone')) {
+        include 'SKILL.md'
+        into 'aibotassist/skills/minecraft-redstone'
+    }
+}
 tasks.named('sourcesJar') { dependsOn 'compileBundledPi'; exclude 'aibotassist/pi/**' }

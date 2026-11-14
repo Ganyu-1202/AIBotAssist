@@ -18,7 +18,17 @@ class PlanTest {
         for (String id : new String[]{"minecraft:air","minecraft:tnt","minecraft:lava","minecraft:chest"})
             assertDoesNotThrow(() -> Plan.parse(json(block("1","0","3",id))));
     }
-    @Test void rejectsDuplicatePositions() { String b=block("1","0","3","minecraft:oak_planks"); assertThrows(Exception.class, () -> Plan.parse(json(b+","+b))); }
+    @Test void identicalSharedCellsOfWingsAndBodyAreCoalescedWithoutDuplicateMaterialCosts() {
+        String b=block("1","0","3","minecraft:oak_planks");
+        var plan=Plan.parse(json(b+","+b),1);assertEquals(1,plan.blocks().size());assertEquals(1,plan.materials().get("minecraft:oak_planks"));
+    }
+    @Test void conflictingCellsReturnCoordinatesAndAreNeverSilentlyOverwritten() {
+        var error=assertThrows(IllegalArgumentException.class,()->Plan.parse(json(block("1","0","3","minecraft:oak_planks")+","+block("1","0","3","minecraft:tnt"))));
+        assertTrue(error.getMessage().contains("1,0,3"));assertTrue(error.getMessage().contains("冲突"));assertTrue(error.getMessage().contains("minecraft:tnt"));
+        var p=com.google.gson.JsonParser.parseString(json(block("1","0","3","minecraft:repeater")+","+block("1","0","3","minecraft:repeater"))).getAsJsonObject();
+        p.getAsJsonArray("blocks").get(1).getAsJsonObject().add("properties",com.google.gson.JsonParser.parseString("{\"facing\":\"east\"}"));
+        assertThrows(IllegalArgumentException.class,()->Plan.parse(p.toString()));
+    }
     @Test void rejectsFractionsAndOverflow() {
         for (String x : new String[]{"0.5","2147483648","-2147483648","17","-17"})
             assertThrows(Exception.class, () -> Plan.parse(json(block(x,"0","3","minecraft:oak_planks"))));
