@@ -168,14 +168,6 @@ public final class SpecialPlacement {
         }
         return true;
     }
-    /** Compare only requested NBT. Unspecified inventory contents must never cause replacement. */
-    public static boolean matchesNbt(Plan.Placement expected,CompoundTag actual) {
-        return expected.nbt().isBlank() || actual!=null && NbtUtils.compareNbt(parseNbt(expected.nbt()),actual,true);
-    }
-    private static boolean runtimeProperty(BlockState state,String name) {
-        return BuiltInRegistries.BLOCK.getKey(state.getBlock()).getNamespace().equals("minecraft")
-            && Set.of("power","powered","lit","triggered","crafting","enabled","locked").contains(name);
-    }
     private static <T extends Comparable<T>> String valueName(BlockState s, Property<T> p) { return p.getName(s.getValue(p)); }
 
     private static CompoundTag parseNbt(String text) {
@@ -243,9 +235,7 @@ public final class SpecialPlacement {
     }
     private static Plan.Placement placement(Plan.Placement p, BlockState s, int x, int y, int z, String nbt) {
         Map<String, String> properties = new TreeMap<>();
-        for (Property<?> prop : s.getProperties())
-            if(!runtimeProperty(s,prop.getName()) || p.properties().containsKey(prop.getName()))
-                properties.put(prop.getName(), valueName(s, prop));
+        for (Property<?> prop : s.getProperties()) properties.put(prop.getName(), valueName(s, prop));
         return new Plan.Placement(x, y, z, p.block(), Map.copyOf(properties), nbt);
     }
     private static IllegalArgumentException invalid(String message) { return new IllegalArgumentException(message); }

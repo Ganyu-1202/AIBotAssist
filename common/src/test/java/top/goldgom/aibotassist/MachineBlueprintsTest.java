@@ -7,21 +7,6 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MachineBlueprintsTest {
-    @Test void signalAndPistonTemplatesKeepConnectedPortsInAllRotations(){
-        for(String kind:List.of("signal_test","piston_test"))for(String facing:List.of("north","south","east","west")){
-            var plan=MachineBlueprints.create(kind,facing);var analysis=RedstoneDiagnostics.analyze(plan);
-            assertTrue(analysis.getAsJsonArray("warnings").isEmpty(),analysis.toString());assertFalse(analysis.get("function_verified").getAsBoolean());
-            for(var b:plan.blocks())SpecialPlacement.blockArgument(b,false);
-            var repeater=plan.blocks().stream().filter(b->b.block().equals("minecraft:repeater")).findFirst().orElseThrow();
-            Direction output=Direction.byName(repeater.properties().get("facing")).getOpposite();
-            assertTrue(plan.blocks().stream().anyMatch(b->b.x()==repeater.x()+output.getStepX()&&b.z()==repeater.z()+output.getStepZ()&&b.y()==repeater.y()&&b.block().equals(kind.equals("signal_test")?"minecraft:redstone_lamp":"minecraft:piston")));
-            assertEquals(1,plan.blocks().stream().filter(b->b.block().equals("minecraft:lever")&&b.properties().get("powered").equals("false")).count());
-        }
-    }
-    @Test void missingRepeaterOutputIsReportedBeforeBuilding(){
-        var plan=new Plan("broken",List.of(new Plan.Placement(0,0,0,"minecraft:repeater",Map.of("facing","north"),"")));
-        String report=RedstoneDiagnostics.analyze(plan).toString();assertTrue(report.contains("output_not_in_plan"));assertTrue(report.contains("support_not_in_plan"));
-    }
     @BeforeAll static void bootstrap(){SharedConstants.tryDetectVersion();Bootstrap.bootStrap();}
     @Test void smelterHoppersConnectToTheCorrectTargetsAfterEveryRotation(){
         for(String facing:List.of("north","south","east","west")){

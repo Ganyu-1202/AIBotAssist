@@ -18,14 +18,12 @@ public final class BuildService {
     private record Pending(Request request, Plan plan, long expires, Map<BlockPos, BlockState> removalStates) {}
     private static final class Job {
         final Pending pending;
-        final Plan expected;
         int index;
         int placedCount,removedCount;
         boolean blocksDone;
         final List<Pending> batches;
         int batchIndex,verifyIndex;
-        int settleUntilTick=-1;
-        Job(Pending pending,Plan expected) {this.pending=pending;this.expected=expected;this.batches=slices(pending);}
+        Job(Pending pending) {this.pending=pending;this.batches=slices(pending);}
 
     }
     private record ProcessingWait(UUID player,String call,String task,long deadline) {}
@@ -74,11 +72,10 @@ public final class BuildService {
                 JsonObject args=o.getAsJsonObject("args");
                 if(!AgentToolCatalog.NAMES.contains(tool))throw new Rejected("工具未注册");
                 stage="校验工具参数："+tool;
-                org.slf4j.LoggerFactory.getLogger("aibotassist").info("AI tool request player={} call={} tool={}",p.getUUID(),call,tool);
                 try{AgentToolCatalog.validateArgs(tool,args);}catch(IllegalArgumentException invalid){agentReply(p,call,"rejected",invalid.getMessage());return;}
-                if(tool.equals("run_advanced_command")||(tool.equals("run_mod_operation")&&top.goldgom.aibotassist.api.AgentExtensions.mutating(args.get("operation").getAsString()))) {
+                if(tool.equals("run_advanced_command")) {
                     Request observed=requests.get(p.getUUID());
-                    if(observed==null||!args.has("token")||!observed.id.equals(args.get("token").getAsString())||observed.expires<now()||!observed.dimension.equals(p.level().dimension().location().toString())||jobs.containsKey(p.getUUID())){agentReply(p,call,"rejected","需重新观察或等待建造完成");return;}
+                    if(observed==null||!observed.id.equals(args.get("token").getAsString())||observed.expires<now()||!observed.dimension.equals(p.level().dimension().location().toString())||jobs.containsKey(p.getUUID())){agentReply(p,call,"rejected","需重新观察或等待建造完成");return;}
                 }
                 if(tool.equals("run_commands")) {
                     Request observed=requests.get(p.getUUID());
@@ -120,13 +117,9 @@ public final class BuildService {
                             }
                             case "fakeplayer_control","capture_fakeplayer" -> FakePlayerService.handle(p,tool,args);
                             case "machine_blueprint" -> MachineBlueprints.describe(p,args);
-                            case "read_agent_skill" -> AgentSkills.read(args);
-                            case "analyze_redstone_plan" -> RedstoneDiagnostics.analyze(Plan.parse(args.get("plan").toString(),requests.containsKey(p.getUUID())?requests.get(p.getUUID()).blockLimit:4096));
-                            case "query_mod_operations" -> top.goldgom.aibotassist.api.AgentExtensions.query(p,args);
-                            case "run_mod_operation" -> top.goldgom.aibotassist.api.AgentExtensions.execute(p,args.get("operation").getAsString(),args.getAsJsonObject("parameters"));
                             default -> AdvancedTools.NAMES.contains(tool)?AdvancedTools.handle(p,tool,args):WorldTools.handle(p,tool,args);
                         };
-                    }catch(Exception failure){result=new JsonObject();result.addProperty("status","rejected");result.addProperty("reason",failure instanceof IllegalArgumentException && failure.getMessage()!=null?failure.getMessage():"参数、材料、设备或权限不满足，请检查查询结果");}
+                    }catch(Exception failure){result=new JsonObject();result.addProperty("status","rejected");result.addProperty("reason","参数、材料、设备或权限不满足，请检查查询结果");}
                     if(tool.equals("get_task_status")&&args.has("wait_ticks")&&result.has("status")&&Set.of("running","waiting_owner").contains(result.get("status").getAsString())) {
                         int ticks=args.get("wait_ticks").getAsBigDecimal().intValueExact();
                         if(ticks<0||ticks>1200)throw new Rejected("wait_ticks必须0到1200");
@@ -202,18 +195,8 @@ public final class BuildService {
                 stage = "解析建造方案";
                 Plan plan = Plan.parse(o.get("plan").getAsString(),r.blockLimit);
                 plan = new Plan(plan.reply(),SpecialPlacement.expand(plan.blocks()),plan.commands(),plan.removals());
-                Plan expected=plan;
                 if (!plan.hasActions()) {finishAgent(p,"completed","空任务，无世界修改");return;}
                 if (p.isSpectator()) { tell(p, "旁观模式只能聊天。");finishAgent(p,"rejected","旁观模式只能聊天"); return; }
-                // Validate even matching blocks before deciding that they require no world mutation.
-                for(var block:plan.blocks())SpecialPlacement.blockArgument(block,p.isCreative());
-                plan=BuildReconciliation.missing(plan,block->{
-                    BlockPos pos=r.origin.offset(block.x(),block.y(),block.z());
-                    if(!p.serverLevel().hasChunkAt(pos)||!SpecialPlacement.matches(block,p.serverLevel().getBlockState(pos)))return false;
-                    if(block.nbt().isBlank())return true;
-                    var entity=p.serverLevel().getBlockEntity(pos);
-                    return entity!=null && SpecialPlacement.matchesNbt(block,entity.saveWithFullMetadata(p.registryAccess()));
-                });
                 Map<BlockPos, BlockState> removalStates = new HashMap<>();
                 for (var b : plan.removals()) { var pos = r.origin.offset(b.x(), b.y(), b.z()); removalStates.put(pos, p.serverLevel().getBlockState(pos)); }
                 // Resolve physical obstruction locally, without another paid model call.
@@ -227,9 +210,8 @@ public final class BuildService {
                 stage = "校验游戏状态、区域、工具和材料";
                 validate(p, task);
                 if(preview){finishAgent(p,"completed","预检通过，尚未执行、未扣材料");return;}
-                WorldTools.blueprint(p,agentCalls.getOrDefault(p.getUUID(),r.id),r.origin,expected);
-                jobs.put(p.getUUID(), new Job(task,expected));
-                org.slf4j.LoggerFactory.getLogger("aibotassist").info("AI build player={} task={} origin={} expected={} placed={} unchanged={} clearing={}",p.getUUID(),agentCalls.get(p.getUUID()),r.origin.toShortString(),expected.blocks().size(),plan.blocks().size(),expected.blocks().size()-plan.blocks().size(),task.removalStates.size());
+                WorldTools.blueprint(p,agentCalls.getOrDefault(p.getUUID(),r.id),r.origin,plan);
+                jobs.put(p.getUUID(), new Job(task));
                 if (!plan.commands().isEmpty()) {
                     tell(p, "AI 提交 " + plan.commands().size() + " 条命令（按你的当前权限执行，不提升 OP）：");
                     for (String command : plan.commands()) tell(p, "/" + command);
@@ -238,12 +220,6 @@ public final class BuildService {
                 tell(p, "检查通过，任务将自动执行。取消排队/后续操作可用 /aibot cancel；已执行部分不会自动撤销。");
             }
         } catch (Rejected e) { tell(p, "请求被拒绝：" + e.getMessage());finishAgent(p,"rejected",e.getMessage());if(incomingCall!=null&&!receipts.getOrDefault(p.getUUID(),new LinkedHashMap<>()).containsKey(incomingCall))agentReply(p,incomingCall,"rejected",e.getMessage()); }
-        catch (IllegalArgumentException e) {
-            String reason=e.getMessage()==null?"工具参数无效，请重新观察并调整方案":e.getMessage();
-            finishAgent(p,"rejected",reason);
-            if(incomingCall!=null&&!receipts.getOrDefault(p.getUUID(),new LinkedHashMap<>()).containsKey(incomingCall))agentReply(p,incomingCall,"rejected",reason);
-            tell(p,"请求被拒绝："+reason);
-        }
         catch (Exception e) {
             String code = UUID.randomUUID().toString().substring(0,8);
             org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger("aibotassist");
@@ -279,7 +255,6 @@ public final class BuildService {
         return palette;
     }
     private static void recordReceipt(ServerPlayer p,String call,JsonObject result) {
-        org.slf4j.LoggerFactory.getLogger("aibotassist").info("AI tool result player={} call={} status={} reason={}",p.getUUID(),call,result.has("status")?result.get("status").getAsString():"unknown",result.has("reason")?result.get("reason").getAsString().replaceAll("[\\r\\n]"," ").substring(0,Math.min(512,result.get("reason").getAsString().length())):"");
         inflight.computeIfAbsent(p.getUUID(),k->new HashSet<>()).remove(call);
         var cache=receipts.computeIfAbsent(p.getUUID(),k->new LinkedHashMap<>());cache.put(call,result.deepCopy());
         while(cache.size()>64)cache.remove(cache.keySet().iterator().next());
@@ -528,19 +503,14 @@ public final class BuildService {
                         budget-=Math.max(1,batch.plan.blocks().size()+batch.removalStates.size());
                         if(j.batchIndex<j.batches.size())continue;
                     }
-                    // Let support updates, fluids and scheduled redstone ticks run before claiming structure completion.
-                    if(!j.pending.plan.blocks().isEmpty()) {
-                        if(j.settleUntilTick<0){j.settleUntilTick=server.getTickCount()+20;continue;}
-                        if(server.getTickCount()<j.settleUntilTick)continue;
-                    }
-                    // Verify the complete submitted plan, including retained existing blocks.
-                    int end=Math.min(j.verifyIndex+128,j.expected.blocks().size());
+                    // Verify the complete submitted plan after all slices, including earlier supports.
+                    int end=Math.min(j.verifyIndex+128,j.pending.plan.blocks().size());
                     for(;j.verifyIndex<end;j.verifyIndex++) {
-                        var block=j.expected.blocks().get(j.verifyIndex);BlockPos pos=j.pending.request.origin.offset(block.x(),block.y(),block.z());
+                        var block=j.pending.plan.blocks().get(j.verifyIndex);BlockPos pos=j.pending.request.origin.offset(block.x(),block.y(),block.z());
                         if(!p.serverLevel().hasChunkAt(pos)||!SpecialPlacement.matches(block,p.serverLevel().getBlockState(pos)))throw new Rejected("整体验证发现方块不一致："+pos.toShortString());
                     }
                     budget-=128;
-                    if(j.verifyIndex<j.expected.blocks().size())continue;
+                    if(j.verifyIndex<j.pending.plan.blocks().size())continue;
                     j.blocksDone=true;
                     if(!j.pending.plan.blocks().isEmpty()||!j.pending.removalStates.isEmpty())tell(p,"清障/建造及整批验证完成：放置 "+j.placedCount+"，拆除 "+j.removedCount+"，分 "+j.batches.size()+" 批执行。");
                 }
@@ -552,7 +522,7 @@ public final class BuildService {
                     j.index++;
                     tell(p, "命令执行成功：" + j.index + "/" + j.pending.plan.commands().size());
                 }
-                if (j.index == j.pending.plan.commands().size()) { tell(p, "任务完成（方块结构检查通过；机器运行需单独验证）。");finishAgent(p,"completed","方块结构/命令执行完成；不代表红石电路或机器功能已验证，请检查verify_result和inspect_machine"); iterator.remove(); }
+                if (j.index == j.pending.plan.commands().size()) { tell(p, "任务完成。");finishAgent(p,"completed","服务器确认任务阶段完成"); iterator.remove(); }
             } catch (Exception e) { finishAgent(p,"partial_possible",e instanceof Rejected?e.getMessage():"执行异常，可能部分生效；先观察再决定后续操作"); if (e instanceof Rejected) tell(p,e.getMessage()); tell(p, "任务已停止：已放置 " + j.placedCount + " 格、拆除 " + j.removedCount + " 格、完成命令 " + j.index + " 条。已执行部分保留，不自动重试或撤销。"); iterator.remove(); }
         }
         long time = now();uploads.expire(time);

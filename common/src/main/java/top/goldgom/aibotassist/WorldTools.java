@@ -80,15 +80,6 @@ public final class WorldTools {
                 Blueprint b=blueprints.getOrDefault(p.getUUID(),new LinkedHashMap<>()).get(args.get("task_id").getAsString());if(b==null||!b.dimension.equals(p.serverLevel().dimension().location().toString()))throw new IllegalArgumentException("没有当前维度个人建筑记录");
                 JsonArray differences=new JsonArray();int mismatched=0;for(var block:b.plan.blocks()){BlockPos pos=b.origin.offset(block.x(),block.y(),block.z());if(!p.serverLevel().hasChunkAt(pos))throw new IllegalArgumentException("区块未加载");if(!SpecialPlacement.matches(block,p.serverLevel().getBlockState(pos))){mismatched++;if(differences.size()<32){JsonObject diff=new JsonObject();diff.addProperty("x",pos.getX());diff.addProperty("y",pos.getY());diff.addProperty("z",pos.getZ());diff.addProperty("expected",block.block()+block.properties());diff.addProperty("actual",p.serverLevel().getBlockState(pos).toString());differences.add(diff);}}}
                 result.addProperty("expected",b.plan.blocks().size());result.addProperty("mismatched",mismatched);result.addProperty("matches",mismatched==0);result.add("differences",differences);result.addProperty("differences_truncated",mismatched>differences.size());
-                result.addProperty("verification_scope","block_states_only");result.addProperty("function_verified",false);
-                JsonArray machines=new JsonArray();int machineCount=0;
-                for(var block:b.plan.blocks()) {
-                    BlockPos pos=b.origin.offset(block.x(),block.y(),block.z());var state=p.serverLevel().getBlockState(pos);
-                    if(!RedstoneDiagnostics.relevant(state))continue;machineCount++;
-                    if(machines.size()<24)machines.add(RedstoneDiagnostics.inspect(pos,state,n->p.serverLevel().hasChunkAt(n)?p.serverLevel().getBlockState(n):null));
-                }
-                result.add("machine_diagnostics",machines);result.addProperty("machine_diagnostics_truncated",machineCount>machines.size());
-                result.addProperty("note","Block-state matching does not prove wiring, inventory/NBT, timing or production. Inspect machine ports/inventory and compare observations over time; no activation was performed.");
             }
             default -> throw new IllegalArgumentException("未知世界工具");
         }return result;

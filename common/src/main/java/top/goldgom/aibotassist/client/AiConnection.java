@@ -1,7 +1,6 @@
 package top.goldgom.aibotassist.client;
 
 import com.google.gson.*;
-import top.goldgom.aibotassist.AgentDebug;
 import com.sun.net.httpserver.HttpServer;
 import java.net.*;
 import java.net.http.*;
@@ -75,12 +74,9 @@ public final class AiConnection {
     private static JsonObject read(HttpResponse<java.io.InputStream> response, int max) throws Exception {
         try (var input = response.body()) {
             byte[] bytes = input.readNBytes(max + 1);
-            AgentDebug.http(response,bytes.length);
             if (response.statusCode() < 200 || response.statusCode() >= 300) throw new PiDiagnostics.HttpFailure(response.statusCode());
             if (bytes.length > max) throw new IllegalStateException("响应过大");
-            AgentDebug.phase("http_json_parse");
-            JsonObject parsed=top.goldgom.aibotassist.ModelResponseReader.parse(new String(bytes, StandardCharsets.UTF_8),response.headers().firstValue("Content-Type").orElse(""));
-            AgentDebug.note("response_shape",AgentDebug.responseShape(parsed));return parsed;
+            return JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8)).getAsJsonObject();
         }
     }
     private synchronized String bearer(ClientSettings settings) throws Exception {
@@ -94,11 +90,6 @@ public final class AiConnection {
         return access;
     }
     public JsonObject agentTurn(ClientSettings settings, JsonArray messages, JsonArray tools) throws Exception {
-        return agentTurn(settings,messages,tools,()->false);
-    }
-    public JsonObject agentTurn(ClientSettings settings,JsonArray messages,JsonArray tools,java.util.function.BooleanSupplier cancelled)throws Exception{
-        if(cancelled.getAsBoolean())throw new InterruptedException();
-        AgentDebug.phase("credentials");
         String token=bearer(settings);
         if(token.isBlank())throw new IllegalStateException("请先登录或配置密钥");
         String protocol=settings.modelProtocol;
@@ -106,28 +97,16 @@ public final class AiConnection {
             if(!catalogKey(settings).equals(catalogKey)) {
                 long version=sessionVersion();
                 try{listModels(settings);}catch(InterruptedException e){throw e;}catch(Exception unavailable){
-                    AgentDebug.note("model_catalog_fallback","type="+AgentDebug.label(unavailable.getClass().getName())+" fallback=chat");
                     // Custom providers can serve a manual model without a discovery endpoint.
                     synchronized(this){if(version!=sessionVersion)throw new InterruptedException("登录状态已改变");modelTypes=Map.of();catalogKey=catalogKey(settings);}
                 }
             }
             protocol=modelType(settings,settings.model);
         }
-        AgentDebug.phase("model_request_encode");
-        AgentDebug.note("model_route","model="+AgentDebug.label(settings.model)+" protocol="+AgentDebug.label(protocol)+" group="+AgentDebug.label(settings.group)+" host="+AgentDebug.label(endpoint(settings.baseUrl).getHost())+" messages="+messages.size()+" tools="+tools.size());
         JsonObject body=top.goldgom.aibotassist.ModelProtocol.body(protocol,settings.model,messages,tools);
-        String selected=protocol;long version=sessionVersion();
-        return top.goldgom.aibotassist.ModelRetry.call(()->{
-            if(cancelled.getAsBoolean()||version!=sessionVersion())throw new InterruptedException("请求已取消或登录状态已改变");
-            AgentDebug.phase("model_http");
-            JsonObject raw=apiRequest.request(settings,token,top.goldgom.aibotassist.ModelProtocol.path(selected),body);
-            if(cancelled.getAsBoolean())throw new InterruptedException();
-            AgentDebug.phase("model_response_decode");AgentDebug.note("response_shape",AgentDebug.responseShape(raw));
-            return top.goldgom.aibotassist.ModelRetry.validateMessage(top.goldgom.aibotassist.ModelProtocol.message(selected,raw));
-        });
+        return top.goldgom.aibotassist.ModelProtocol.message(protocol,apiRequest.request(settings,token,top.goldgom.aibotassist.ModelProtocol.path(protocol),body));
     }
     public List<String> listModels(ClientSettings settings) throws Exception {
-        AgentDebug.phase("model_catalog");
         String token;long version;
         synchronized(this) {token=bearer(settings);version=sessionVersion;}
         if(token.isBlank())throw new IllegalStateException("请先登录或配置密钥");

@@ -4,15 +4,10 @@ import { createInterface } from 'node:readline';
 
 const pending = new Map(); let seq=0, agent, active=false;
 const send = value => process.stdout.write(JSON.stringify(value)+'\n');
-// Error.message can contain a quoted model response, argument JSON or credentials. Emit categories only.
-function diagnostic(stage,error) {
-  const name=['SyntaxError','TypeError','RangeError','ReferenceError','Error','AbortError'].includes(error?.name)?error.name:'UnknownError';
-  send({kind:'diagnostic',stage,error_type:name});
-}
 function rpc(kind, payload) {
   const id=String(++seq); send({kind,id,...payload});
   return new Promise((resolve,reject)=>{
-    const timer=setTimeout(()=>{pending.delete(id);agent?.abort();reject(new Error('Bridge timeout: effect unknown; do not retry'));},kind==='model'?330000:110000);
+    const timer=setTimeout(()=>{pending.delete(id);agent?.abort();reject(new Error('Bridge timeout: effect unknown; do not retry'));},110000);
     pending.set(id,{resolve:v=>{clearTimeout(timer);resolve(v);},reject});
   });
 }
@@ -41,25 +36,14 @@ export function toOpenAI(context) {
 async function run(init) {
   if(active)throw new Error('Already active');active=true;let turns=0, executions=0,viewAttempts=0,reviewSequence=0,needsView=false,viewFailed=false;
   const visualReview=init.visual_review===true && init.tools.some(t=>t.function.name==='capture_view');
-  const canVerify=init.tools.some(t=>t.function.name==='verify_result');
-  const pendingVerification=new Set(),failedVerification=new Set(),structureMismatch=new Set();let machineUnverified=false;
   const model={id:'minecraft-java-bridge',name:'Minecraft',api:'openai-completions',provider:'java',baseUrl:'https://unused.invalid/v1',reasoning:false,input:['text','image'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:64000,maxTokens:12000};
   agent=new Agent({initialState:{systemPrompt:init.system,model,thinkingLevel:'off',tools:init.tools.map(t=>({
     name:t.function.name,label:t.function.name,description:t.function.description,parameters:t.function.parameters,
     execute:async(_id,args)=>{
-      if((['execute_task','build_structure','repair_structure','craft_items','process_items','run_commands','run_advanced_command','run_mod_operation'].includes(t.function.name) || t.function.name==='fakeplayer_control'&&args.action!=='status') && ++executions>16)throw new Error('Execution budget exhausted');
+      if((['execute_task','build_structure','repair_structure','craft_items','process_items','run_commands','run_advanced_command'].includes(t.function.name) || t.function.name==='fakeplayer_control'&&args.action!=='status') && ++executions>16)throw new Error('Execution budget exhausted');
       const result=await rpc('tool',{name:t.function.name,args});
       const construction=['build_structure','repair_structure'].includes(t.function.name) || (t.function.name==='execute_task' && ((args.plan?.blocks?.length??0)+(args.plan?.volumes?.length??0)+(args.plan?.removals?.length??0)>0));
       if(construction && ['completed','partial_possible'].includes(result.status))needsView=true;
-      if(construction && ['completed','partial_possible'].includes(result.status) && typeof result.task_id==='string' && canVerify)pendingVerification.add(result.task_id);
-      if(t.function.name==='verify_result') {
-        pendingVerification.delete(args.task_id);
-        if(result.status==='completed') {
-          failedVerification.delete(args.task_id);
-          if(result.matches===false)structureMismatch.add(args.task_id);else structureMismatch.delete(args.task_id);
-          if(result.function_verified===false && result.machine_diagnostics?.length)machineUnverified=true;
-        } else failedVerification.add(args.task_id);
-      }
       if(['capture_view','capture_fakeplayer'].includes(t.function.name)){viewAttempts++;needsView=false;viewFailed=result.status!=='captured';}
       if(result.status==='unknown') {agent.abort();throw new Error('Unknown effect; stop without retry');}
       if(['capture_view','capture_map','capture_fakeplayer'].includes(t.function.name) && result.status==='captured') {
@@ -75,34 +59,21 @@ async function run(init) {
     const usage={input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}};
     const base={role:'assistant',api:model.api,provider:model.provider,model:model.id,timestamp:Date.now(),usage};
     (async()=>{
-      let stage='model_rpc';
       try {
         let response=await rpc('model',{messages:toOpenAI(context)});
-        stage='model_response_shape';
-        if(!response.tool_calls?.length && pendingVerification.size && turns<30) {
-          response={role:'assistant',content:null,tool_calls:[{id:`aibot-verify-${++reviewSequence}`,type:'function',function:{name:'verify_result',arguments:JSON.stringify({task_id:pendingVerification.values().next().value})}}]};
-        } else if(visualReview && !response.tool_calls?.length && needsView && viewAttempts<3 && turns<30) {
+        if(visualReview && !response.tool_calls?.length && needsView && viewAttempts<3 && turns<30) {
           // Let the existing tool loop obtain real pixels before accepting an unreviewed completion.
           response={role:'assistant',content:null,tool_calls:[{id:`aibot-review-${++reviewSequence}`,type:'function',function:{name:'capture_view',arguments:'{}'}}]};
         } else if(visualReview && !response.tool_calls?.length && (needsView || viewFailed)) {
           const note=(init.language??'').startsWith('zh')?'图片校准未完成：截图不可用或已达本轮次数上限，不能据此确认外观。':'Visual review is incomplete: capture was unavailable or its budget was exhausted; appearance has not been confirmed.';
           response={...response,content:(response.content??'')+'\n'+note};
         }
-        if(!response.tool_calls?.length && (machineUnverified || structureMismatch.size || pendingVerification.size || failedVerification.size)) {
-          const zh=(init.language??'').startsWith('zh');
-          const notes=[];
-          if(machineUnverified)notes.push(zh?'机器运行验收未完成：方块与静态端口检查不能证明红石时序或机器功能正常。':'Machine operation remains unverified: block and static port checks do not prove timing or function.');
-          if(structureMismatch.size || pendingVerification.size || failedVerification.size)notes.push(zh?'建筑结构复核未通过或未完成，请检查工具差异记录。':'Structure verification failed or is incomplete; inspect tool differences.');
-          response={...response,content:(response.content??'')+'\n'+notes.join('\n')};
-        }
         const content=[];
         if(response.content)content.push({type:'text',text:response.content});
-        stage='tool_arguments_json';
         for(const c of response.tool_calls??[])content.push({type:'toolCall',id:c.id,name:c.function.name,arguments:JSON.parse(c.function.arguments)});
         const message={...base,content,stopReason:response.tool_calls?.length?'toolUse':'stop'};
         stream.push({type:'done',reason:message.stopReason,message});stream.end(message);
-      } catch (failure) {
-        diagnostic(stage,failure);
+      } catch {
         const error={...base,content:[],stopReason:'error',errorMessage:'Model bridge failed; no automatic retry'};
         stream.push({type:'error',reason:'error',error});stream.end(error);
       }
@@ -122,9 +93,9 @@ if(!process.env.AIBOT_PI_TEST_IMPORT) {
       if(line.length>8388608)throw new Error('Oversized bridge message');
       const msg=JSON.parse(line);
       if(msg.kind==='response') {const item=pending.get(msg.id);if(item){pending.delete(msg.id);item.resolve(msg.result);}}
-      else if(msg.kind==='start')run(msg).catch(error=>{diagnostic('agent_run',error);send({kind:'done',error:'Pi runtime failed'});});
+      else if(msg.kind==='start')run(msg).catch(()=>send({kind:'done',error:'Pi runtime failed'}));
       else if(msg.kind==='abort')agent?.abort();
-    }catch(error){diagnostic('bridge_input',error);send({kind:'done',error:'Invalid bridge message'});}
+    }catch{send({kind:'done',error:'Invalid bridge message'});}
   });
   lines.on('close',()=>{agent?.abort();process.exit(0);});
   send({kind:'ready',runtime:'pi-agent-core',version:'0.85.1'});

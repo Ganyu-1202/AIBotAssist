@@ -15,23 +15,6 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SharedModelHttpTest {
-    @Test void sharedModelRetriesTransientHttpWithinSameConfiguredRequest()throws Exception{
-        var client=new FakeClient(200,"{\"choices\":[{\"message\":{\"content\":\"recovered\"}}]}");client.failures=1;
-        var result=SharedModelHttp.request(client,ServerApiConfigTest.config(),input("same-message")).get(8,TimeUnit.SECONDS);
-        assertEquals("recovered",result.get("content").getAsString());assertEquals(2,client.calls);assertTrue(body(client.request).contains("same-message"));
-    }
-    @Test void sharedResponsesRestoresCompletedToolFromStreamWithEmptyFinalOutput()throws Exception{
-        var config=ServerApiConfigTest.config();config.modelProtocol="responses";
-        var client=new FakeClient(200,ModelResponseReaderTest.done(0,ModelResponseReaderTest.CALL)+ModelResponseReaderTest.END);
-        var result=SharedModelHttp.request(client,config,input("test")).get(3,TimeUnit.SECONDS);
-        assertEquals("observe_world",result.getAsJsonArray("tool_calls").get(0).getAsJsonObject().getAsJsonObject("function").get("name").getAsString());
-        assertTrue(JsonParser.parseString(body(client.request)).getAsJsonObject().get("stream").getAsBoolean());
-    }
-    @Test void sharedInterruptedStreamCannotReturnPartialTools()throws Exception{
-        var config=ServerApiConfigTest.config();config.modelProtocol="responses";
-        var failed=SharedModelHttp.request(new FakeClient(200,ModelResponseReaderTest.done(0,ModelResponseReaderTest.CALL)),config,input("test"));
-        assertThrows(ExecutionException.class,()->failed.get(8,TimeUnit.SECONDS));
-    }
     @Test void serverPinsResponsesProtocolAndGroupRegardlessOfClientFields()throws Exception{
         var c=ServerApiConfigTest.config();c.baseUrl="https://openai.goldgom.top/v1";c.group="vip";c.modelProtocol="responses";
         var input=input("hello");input.addProperty("group","attacker");input.addProperty("model_protocol","chat");
@@ -57,7 +40,7 @@ class SharedModelHttpTest {
     }
     @Test void upstreamErrorsNeverForwardProviderBodyOrSecrets()throws Exception{
         var failed=SharedModelHttp.request(new FakeClient(401,"secret-key-and-provider-stacktrace"),ServerApiConfigTest.config(),input("test"));
-        var error=assertThrows(ExecutionException.class,()->failed.get(8,TimeUnit.SECONDS));assertTrue(error.getCause().getMessage().contains("HTTP401"));assertFalse(error.toString().contains("secret-key"));
+        var error=assertThrows(ExecutionException.class,()->failed.get(3,TimeUnit.SECONDS));assertTrue(error.getCause().getMessage().contains("HTTP401"));assertFalse(error.toString().contains("secret-key"));
     }
     @Test void cancellingOneModelCallCancelsItsUpstreamWithoutTouchingAnother()throws Exception{
         var alice=new FakeClient(200,"");alice.delay=true;var bob=new FakeClient(200,"");bob.delay=true;
@@ -70,13 +53,13 @@ class SharedModelHttpTest {
         });done.get(3,TimeUnit.SECONDS);return bytes.toString(StandardCharsets.UTF_8);
     }
     private static final class FakeClient extends HttpClient {
-        final int code;final String response;HttpRequest request;boolean delay;CompletableFuture<?> flight;int calls,failures;
+        final int code;final String response;HttpRequest request;boolean delay;CompletableFuture<?> flight;
         FakeClient(int code,String response){this.code=code;this.response=response;}
         public Optional<CookieHandler> cookieHandler(){return Optional.empty();}public Optional<Duration> connectTimeout(){return Optional.empty();}public Redirect followRedirects(){return Redirect.NEVER;}public Optional<ProxySelector> proxy(){return Optional.empty();}
         public SSLContext sslContext(){try{return SSLContext.getDefault();}catch(Exception e){throw new RuntimeException(e);}}public SSLParameters sslParameters(){return new SSLParameters();}public Optional<Authenticator> authenticator(){return Optional.empty();}public Version version(){return Version.HTTP_1_1;}public Optional<Executor> executor(){return Optional.empty();}
         public <T> HttpResponse<T> send(HttpRequest r,HttpResponse.BodyHandler<T> h){throw new UnsupportedOperationException();}
-        @SuppressWarnings("unchecked") public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest r,HttpResponse.BodyHandler<T> h){request=r;int status=calls++<failures?503:code;HttpResponse<T> value=new HttpResponse<>(){
-            public int statusCode(){return status;}public HttpRequest request(){return r;}public Optional<HttpResponse<T>> previousResponse(){return Optional.empty();}public HttpHeaders headers(){return HttpHeaders.of(Map.of(),(a,b)->true);}public T body(){return (T)new ByteArrayInputStream(response.getBytes(StandardCharsets.UTF_8));}public Optional<SSLSession> sslSession(){return Optional.empty();}public URI uri(){return r.uri();}public Version version(){return Version.HTTP_1_1;}
+        @SuppressWarnings("unchecked") public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest r,HttpResponse.BodyHandler<T> h){request=r;HttpResponse<T> value=new HttpResponse<>(){
+            public int statusCode(){return code;}public HttpRequest request(){return r;}public Optional<HttpResponse<T>> previousResponse(){return Optional.empty();}public HttpHeaders headers(){return HttpHeaders.of(Map.of(),(a,b)->true);}public T body(){return (T)new ByteArrayInputStream(response.getBytes(StandardCharsets.UTF_8));}public Optional<SSLSession> sslSession(){return Optional.empty();}public URI uri(){return r.uri();}public Version version(){return Version.HTTP_1_1;}
         };var future=new CompletableFuture<HttpResponse<T>>();flight=future;if(!delay)future.complete(value);return future;}
         public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest r,HttpResponse.BodyHandler<T> h,HttpResponse.PushPromiseHandler<T> p){return sendAsync(r,h);}
     }

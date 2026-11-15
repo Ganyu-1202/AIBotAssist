@@ -55,7 +55,6 @@ public final class AdvancedTools {
         if(!p.serverLevel().hasChunkAt(pos))return error("chunk_not_loaded_use_world_snapshot");
         if(!admin(p)&&pos.distSqr(p.blockPosition())>32*32)return error("outside_player_inspection_range");
         var level=p.serverLevel();var state=level.getBlockState(pos);JsonObject o=ok();o.addProperty("position",pos.toShortString());o.addProperty("block",BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());o.addProperty("state",state.toString());
-        if(RedstoneDiagnostics.relevant(state))o.add("redstone",RedstoneDiagnostics.inspect(pos,state,n->level.hasChunkAt(n)?level.getBlockState(n):null));
         JsonObject signals=new JsonObject();JsonArray neighbors=new JsonArray();
         for(Direction d:Direction.values()){BlockPos n=pos.relative(d);if(!level.hasChunkAt(n))continue;signals.addProperty(d.getName(),level.getSignal(n,d));JsonObject v=new JsonObject();v.addProperty("side",d.getName());v.addProperty("state",level.getBlockState(n).toString());neighbors.add(v);}
         o.add("incoming_signals",signals);o.add("neighbors",neighbors);o.addProperty("powered",level.hasNeighborSignal(pos));

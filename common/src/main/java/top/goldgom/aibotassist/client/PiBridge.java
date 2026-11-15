@@ -18,22 +18,12 @@ public final class PiBridge {
     public static void run(ClientSettings settings,String prompt,boolean server,AiConnection connection,
                            MinecraftAgent.Transport transport,Consumer<String> text,BooleanSupplier cancelled,
                            Consumer<AgentChatState.Progress> progress) throws Exception {
-        run(settings,prompt,server,(messages,tools)->connection.agentTurn(settings,messages,tools,cancelled),transport,text,cancelled,progress);
+        run(settings,prompt,server,(messages,tools)->connection.agentTurn(settings,messages,tools),transport,text,cancelled,progress);
     }
     @FunctionalInterface public interface ModelTurn {JsonObject request(JsonArray messages,JsonArray tools)throws Exception;}
     public static void run(ClientSettings settings,String prompt,boolean server,ModelTurn modelTurn,
                            MinecraftAgent.Transport transport,Consumer<String> text,BooleanSupplier cancelled,
                            Consumer<AgentChatState.Progress> progress)throws Exception {
-        try(var trace=new AgentDebug()) {
-            trace.event("request","model="+AgentDebug.label(settings.model)+" group="+AgentDebug.label(settings.group)+" configured_protocol="+AgentDebug.label(settings.modelProtocol)+" server_mod="+server+" prompt_chars="+prompt.length());
-            try {runTraced(settings,prompt,server,modelTurn,transport,text,cancelled,progress);trace.stage("completed");}
-            catch(Exception e){trace.failure(e);if(e instanceof InterruptedException)throw e;throw new PiDiagnostics.DiagnosticFailure(trace.id,trace.stage(),e);}
-        }
-    }
-    private static void runTraced(ClientSettings settings,String prompt,boolean server,ModelTurn modelTurn,
-                           MinecraftAgent.Transport transport,Consumer<String> text,BooleanSupplier cancelled,
-                           Consumer<AgentChatState.Progress> progress)throws Exception {
-        var trace=AgentDebug.current();trace.stage("runtime_start");
         ProcessBuilder builder;
         if(settings.piRuntime.isBlank() || settings.piRuntime.equals("agent-runtime/index.mjs")) {
             builder=new ProcessBuilder(BundledPi.executable().toString());
@@ -46,18 +36,10 @@ public final class PiBridge {
         builder.environment().keySet().removeIf(k -> k.toUpperCase().matches(".*(TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL).*"));
         Process process;
         try{process=builder.start();}catch(java.io.IOException e){throw new PiDiagnostics.StartFailure(e);}
-        trace.event("process","pid="+process.pid());
-        Thread errors=new Thread(()->{
-            StringBuilder sample=new StringBuilder();long count=0;
-            try(var err=new java.io.InputStreamReader(process.getErrorStream(),StandardCharsets.UTF_8)){
-                char[] buffer=new char[2048];int n;while((n=err.read(buffer))!=-1){count+=n;if(sample.length()<8192)sample.append(buffer,0,Math.min(n,8192-sample.length()));}
-            }catch(Exception ignored){}finally{if(count>0)trace.event("stderr",AgentDebug.stderrSummary(sample.toString(),count));}
-        },"aibot-pi-stderr");errors.setDaemon(true);errors.start();
-        trace.stage("runtime_handshake");
+        Thread errors=new Thread(()->{try(var err=process.getErrorStream()){err.transferTo(java.io.OutputStream.nullOutputStream());}catch(Exception ignored){}},"aibot-pi-stderr");errors.setDaemon(true);errors.start();
         long deadline=System.currentTimeMillis()+600_000;
-        var deadlineExceeded=new java.util.concurrent.atomic.AtomicBoolean();
         Thread watchdog=new Thread(()->{
-            try {while(process.isAlive()) {if(cancelled.getAsBoolean()){process.destroy();return;}if(System.currentTimeMillis()>deadline){deadlineExceeded.set(true);process.destroy();return;}Thread.sleep(100);}}
+            try {while(process.isAlive()) {if(cancelled.getAsBoolean() || System.currentTimeMillis()>deadline){process.destroy();return;}Thread.sleep(100);}}
             catch(InterruptedException ignored){}
         },"aibot-pi-watchdog");watchdog.setDaemon(true);watchdog.start();
         int models=0,executions=0,toolCalls=0,captures=0;boolean ready=false;
@@ -71,60 +53,42 @@ public final class PiBridge {
                 if(kind.equals("ready")) {
                     if(ready || !event.get("runtime").getAsString().equals("pi-agent-core") || !event.get("version").getAsString().equals("0.85.1"))throw new IllegalStateException("Pi运行时版本不匹配");
                     ready=true;
-                    trace.event("runtime_ready","runtime=pi-agent-core version=0.85.1");
                     progress.accept(new AgentChatState.Progress(AgentChatState.Phase.THINKING,"",models,toolCalls));
-                    JsonObject start=new JsonObject();start.addProperty("kind","start");start.addProperty("prompt",prompt);start.addProperty("visual_review",settings.visualCalibration);start.addProperty("language",settings.gameLanguage);start.addProperty("system",AgentSkills.GUIDANCE+SYSTEM+" 红石机器必须逐段检查电源→连线→延时→执行器；中继器/比较器facing是输入方向，输出为相反方向，发射器facing是喷射方向。inspect_machine和verify_result返回端口位置及空端口警告。completed/matches只代表放置结构；function_verified=false时不得声称能正常运行。检查TNT推进与弹丸支路是否分离、末端是否真正连接、延时与水槽是否正确，先保持停机，不自动点火。发现缺口只补必要方块，已经符合方案的方块会保留，带库存的发射器不能为了重试而整体拆除。build_structure仅支持house/wall/bridge/stairs且width/depth=3..11、height=2..8；红石装置和其他尺寸用execute_task的blocks/volumes，不重复错误调用。 本次设置：单批方块上限="+(settings.blockLimit==0?"无限":settings.blockLimit)+"；建造后自动图片校准="+settings.visualCalibration+"。"+(settings.visualCalibration?"完成前必须复核画面，必要时修正后再次查看。":"仅玩家明确要求查看画面时调用截图，不因建造自动截图。")+" 当前玩家Minecraft语言代码："+settings.gameLanguage+"。build_structure支持palette对象wall/floor/roof/frame/window独立材料，material为未指定部位回退值。");
+                    JsonObject start=new JsonObject();start.addProperty("kind","start");start.addProperty("prompt",prompt);start.addProperty("visual_review",settings.visualCalibration);start.addProperty("language",settings.gameLanguage);start.addProperty("system",SYSTEM+" 本次设置：单批方块上限="+(settings.blockLimit==0?"无限":settings.blockLimit)+"；建造后自动图片校准="+settings.visualCalibration+"。"+(settings.visualCalibration?"完成前必须复核画面，必要时修正后再次查看。":"仅玩家明确要求查看画面时调用截图，不因建造自动截图。")+" 当前玩家Minecraft语言代码："+settings.gameLanguage+"。build_structure支持palette对象wall/floor/roof/frame/window独立材料，material为未指定部位回退值。");
                     start.add("tools",ClientVision.tools(server));write(output,start);
-                } else if(kind.equals("diagnostic")) {
-                    String stage=event.has("stage")?event.get("stage").getAsString():"unknown";
-                    trace.stage("pi/"+AgentDebug.label(stage));
-                    trace.event("pi_error","type="+AgentDebug.label(event.has("error_type")?event.get("error_type").getAsString():"unknown"));
                 } else if(kind.equals("text")) {
                     String value=event.get("text").getAsString();text.accept(value.substring(0,Math.min(value.length(),4000)));
                 } else if(kind.equals("done")) {
-                    trace.event("runtime_done","ready="+ready+" error="+AgentDebug.shape(event.get("error"))+" models="+models+" tools="+toolCalls);
                     if(!ready || (event.has("error")&&!event.get("error").isJsonNull()))throw new IllegalStateException("Pi运行失败或模型不支持工具调用");
                     return;
                 } else if(kind.equals("model") || kind.equals("tool")) {
                     JsonObject result;
                     if(kind.equals("model")) {
-                        trace.stage("model_request");
                         if(++models>32)throw new IllegalStateException("模型轮数预算耗尽");
                         progress.accept(new AgentChatState.Progress(AgentChatState.Phase.THINKING,"",models,toolCalls));
                         result=modelTurn.request(event.getAsJsonArray("messages"),ClientVision.tools(server));
-                        trace.event("model_message",AgentDebug.responseShape(result));trace.stage("runtime_model_conversion");
                     } else {
                         String name=event.get("name").getAsString();JsonObject args=event.getAsJsonObject("args");
-                        trace.stage("tool/"+AgentDebug.label(name));
-                        trace.event("tool_start","rpc_id="+AgentDebug.label(event.get("id").getAsString())+" args="+AgentDebug.shape(args));
                         if(!ClientIntegrations.NAMES.contains(name)&&!ClientVision.isCapture(name)&&!name.equals("observe_world")&&!name.equals("execute_task")&&!AgentToolCatalog.NAMES.contains(name))throw new IllegalArgumentException("未授权工具");
                         if(!server && !ClientIntegrations.NAMES.contains(name) && !ClientVision.isLocalCapture(name))throw new IllegalArgumentException("服务器未安装模组，仅能聊天和查看视野");
                         progress.accept(new AgentChatState.Progress(name.equals("get_task_status")?AgentChatState.Phase.WAITING:AgentChatState.Phase.TOOL,name,models,++toolCalls));
                         try {
-                            if(name.equals("preview_task"))Plan.parse(args.get("plan").toString(),settings.blockLimit);
-                            if(name.equals("execute_task")||name.equals("build_structure")||name.equals("repair_structure")||name.equals("craft_items")||name.equals("process_items")||name.equals("run_commands")||name.equals("run_advanced_command")||name.equals("run_mod_operation")||(name.equals("fakeplayer_control")&&(!args.has("action")||!"status".equals(args.get("action").getAsString())))) {
+                            if(name.equals("execute_task")||name.equals("build_structure")||name.equals("repair_structure")||name.equals("craft_items")||name.equals("process_items")||name.equals("run_commands")||name.equals("run_advanced_command")||(name.equals("fakeplayer_control")&&(!args.has("action")||!"status".equals(args.get("action").getAsString())))) {
                                 if(name.equals("execute_task"))Plan.parse(args.get("plan").toString(),settings.blockLimit);
                                 if(++executions>16)throw new IllegalStateException("执行调用预算耗尽");
                             }
                             result=ClientVision.isCapture(name) && ++captures>3?ClientVision.rejected("View capture budget exhausted (3 per request)"):transport.request(name,args);
                         } catch(IllegalArgumentException invalid) {
-                            trace.failure(invalid);
-                            result=new JsonObject();result.addProperty("status","rejected");result.addProperty("reason",invalid.getMessage()==null?"参数不符合游戏工具格式或安全规则，请调整":invalid.getMessage());
+                            result=new JsonObject();result.addProperty("status","rejected");result.addProperty("reason","参数不符合游戏工具格式或安全规则，请调整");
                         }
-                        trace.event("tool_result","status="+AgentDebug.label(result.has("status")?result.get("status").getAsString():"missing")+" reason="+AgentDebug.shape(result.get("reason")));
                     }
                     if(cancelled.getAsBoolean())throw new InterruptedException("Pi已取消");
                     JsonObject response=new JsonObject();response.addProperty("kind","response");response.addProperty("id",event.get("id").getAsString());response.add("result",result);write(output,response);
                 } else throw new IllegalArgumentException("不支持的Pi协议事件");
             }
             throw new IllegalStateException("Pi进程提前退出，执行状态可能未知，不自动重试");
-        } catch(Exception failure) {
-            if(deadlineExceeded.get())throw new PiDiagnostics.TurnDeadline();
-            throw failure;
         } finally {
-            trace.event("process_before_cleanup","alive="+process.isAlive()+(process.isAlive()?"":" exit="+process.exitValue()));
             process.destroy();if(!process.waitFor(2,TimeUnit.SECONDS))process.destroyForcibly();watchdog.interrupt();
-            errors.join(200);
         }
     }
     private static void write(java.io.BufferedWriter output,JsonObject value)throws java.io.IOException {output.write(value.toString());output.newLine();output.flush();}

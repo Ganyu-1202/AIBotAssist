@@ -51,7 +51,7 @@ public final class ClientServerApi {
     public static JsonObject turn(String revision,JsonArray messages,JsonArray tools)throws Exception{
         if(!policy.shared()||!policy.revision.equals(revision))throw new Failure("服务器API策略已改变，请重新发送消息");
         JsonObject body=new JsonObject();body.add("messages",messages);body.add("tools",tools);JsonObject o=new JsonObject();o.addProperty("revision",revision);o.add("body",body);
-        return request("api_completion",o).get(310,TimeUnit.SECONDS);
+        return request("api_completion",o).get(100,TimeUnit.SECONDS);
     }
     public static void cancelModels(){
         pending.entrySet().removeIf(e->{if(e.getValue().action.equals("api_completion")){e.getValue().future.completeExceptionally(new InterruptedException());return true;}return false;});
@@ -63,7 +63,7 @@ public final class ClientServerApi {
         JsonObject packet=args.deepCopy();packet.addProperty("action",action);packet.addProperty("call",id);List<String> parts;
         try{parts=PacketChunks.encode(packet.toString(),id);}catch(Exception e){return CompletableFuture.failedFuture(new Failure("服务器API消息超过传输上限"));}
         CompletableFuture<JsonObject> future=new CompletableFuture<>();pending.put(id,new Pending(action,future));
-        future.orTimeout(action.equals("api_completion")?310:8,TimeUnit.SECONDS).whenComplete((v,e)->pending.remove(id));
+        future.orTimeout(action.equals("api_completion")?100:8,TimeUnit.SECONDS).whenComplete((v,e)->pending.remove(id));
         mc.execute(()->{
             if(future.isDone())return;
             if(mc.getConnection()!=connection||mc.level!=level||!serverPresent()){future.completeExceptionally(new InterruptedException());return;}

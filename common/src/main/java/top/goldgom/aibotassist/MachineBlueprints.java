@@ -26,15 +26,7 @@ public final class MachineBlueprints {
             for(int x:new int[]{0,2})for(int z=3;z<6;z++)add(blocks,x,1,z,"redstone_wire",Map.of(),facing);
             add(blocks,1,1,3,"repeater",Map.of("facing","east","delay","4"),facing);
             add(blocks,1,1,5,"repeater",Map.of("facing","west","delay","4"),facing);
-        }else if(kind.equals("signal_test")||kind.equals("piston_test")){
-            for(int z=3;z<=9;z++)add(blocks,0,0,z,"stone",Map.of(),facing);
-            add(blocks,0,1,3,"lever",Map.of("face","floor","facing","north","powered","false"),facing);
-            add(blocks,0,1,4,"redstone_wire",Map.of(),facing);
-            add(blocks,0,1,5,"redstone_wire",Map.of(),facing);
-            add(blocks,0,1,6,"repeater",Map.of("facing","north","delay","1"),facing);
-            add(blocks,0,1,7,kind.equals("signal_test")?"redstone_lamp":"piston",kind.equals("signal_test")?Map.of():Map.of("facing","south"),facing);
-            if(kind.equals("piston_test"))add(blocks,0,1,8,"stone",Map.of(),facing);
-        }else throw new IllegalArgumentException("kind=auto_smelter/repeater_clock/signal_test/piston_test");
+        }else throw new IllegalArgumentException("kind=auto_smelter/repeater_clock");
         return new Plan(kind,blocks);
     }
     private static void add(List<Plan.Placement> b,int x,int y,int z,String id,Map<String,String> properties,String facing){
@@ -47,8 +39,6 @@ public final class MachineBlueprints {
         if(a.get("kind").getAsString().equals("auto_crafter"))return crafter(player,a);
         String kind=a.get("kind").getAsString();Plan plan=create(kind,a.has("facing")?a.get("facing").getAsString():"south");JsonObject o=AdvancedTools.ok();o.add("plan",new Gson().toJsonTree(plan));o.addProperty("executed",false);
         o.addProperty("instructions",kind.equals("auto_smelter")?"最高箱放原料，侧箱放熔炉燃料，下箱收输出。先query_recipes验证smelting配方。空机器不会生产，勿把建造完成等同生产验证。":"8刻中继器环默认关闭；用短脉冲启动，长输入会锁成常亮。必须隔tick读取信号确认振荡，拆一段红石可停止。");
-        if(kind.equals("signal_test")||kind.equals("piston_test"))o.addProperty("instructions","默认拉杆关闭；检查固定原点下从z=3到z=7的信号链，旋转后以plan坐标为准。经授权开启/关闭拉杆，用inspect_machine检查灯或活塞变化；活塞前方第9格必须留空，推出的方块不会被普通活塞拉回。完成前保持停机并说明测试结果。");
-        o.add("redstone_analysis",RedstoneDiagnostics.analyze(plan));
         o.addProperty("verification","execute_task/verify_result核对静态方块；inspect_machine比较投入前后库存与红石状态，capture_view校准外观。红石线连接/电量属动态状态，不保证与最初蓝图一致。");return o;
     }
     private static JsonObject crafter(ServerPlayer player,JsonObject a){
